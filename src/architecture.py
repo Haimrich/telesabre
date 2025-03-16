@@ -70,6 +70,10 @@ class Architecture:
         self.core_comm_qubits = [[] for _ in range(self.num_cores)]
         for p in self.communication_qubits:
             self.core_comm_qubits[self.qubit_to_core[p]].append(p)
+            
+        self.core_qubits = [[] for _ in range(self.num_cores)]
+        for p in range(self.num_qubits):
+            self.core_qubits[self.qubit_to_core[p]].append(p)
         
             
 

@@ -6,6 +6,7 @@ import numpy as np
 from copy import deepcopy
 
 from layout import Layout
+from utils import NpEncoder, SparseBucketPriorityQueue
 from plotting import plot_iteration
 
 
@@ -52,7 +53,7 @@ def get_nearest_free_qubits(layout, dist_matrix, target_qubits):
 
 
 
-def heuristic_score(dag, hyp_layout, dist_matrix, decay, node_to_gate, interpaths, architecture, intracore_dist_matrix):
+def calculate_energy(dag, hyp_layout, dist_matrix, decay, node_to_gate, interpaths, architecture, intracore_dist_matrix):
     score = 0
     
     # Calculate weighted score using exponential decay based on depth
@@ -82,23 +83,9 @@ def heuristic_score(dag, hyp_layout, dist_matrix, decay, node_to_gate, interpath
                 
     return score
 
-def sabre_mapping(circuit, architecture, seed=42, max_iterations=None, visualize=False):
-    np.random.seed(seed)
-    
-    # Initialize metrics
-    swap_count = 0
-    teleportation_count = 0
-    telegate_count = 0
-    circuit_depth = 0
-    
-    # Create mapping from DAG nodes to gates
-    node_gate = {node: circuit.gates[node] for node in circuit.dag.nodes}
-    
-    # Topological generations for debugging
-    print("Circuit layers:", list(nx.topological_generations(circuit.dag)))
-    
-    # Initialize layout with identity mapping
-    # build initial mapping that allows teleports (no core with capacity < 2)
+
+def initial_layout(circuit, architecture):
+    """Builds naive initial layout that allows teleports (no core with capacity < 2)."""
     core_capacities = [architecture.num_qubits // architecture.num_cores] * architecture.num_cores
     phys_to_virt = []
     virt = 0
@@ -112,75 +99,84 @@ def sabre_mapping(circuit, architecture, seed=42, max_iterations=None, visualize
         else:
             phys_to_virt.append(virt_empty)
             virt_empty += 1
-    # phys_to_virt = range(architecture.num_qubits)
-    layout = Layout(phys_to_virt, architecture.qubit_to_core, circuit.num_qubits)
-    
-    # Create coupling map (undirected graph for connectivity checks)
+    return Layout(phys_to_virt, architecture.qubit_to_core, circuit.num_qubits)
+
+
+def calculate_global_distance_matrix(architecture):
     basic_edges = [(e.p1, e.p2) for e in architecture.edges]
-    reverse_edges = [(e.p2, e.p1) for e in architecture.edges]
-    all_edges = basic_edges + reverse_edges
-    
-    coupling_map = nx.Graph()
-    coupling_map.add_nodes_from(range(architecture.num_qubits))
-    coupling_map.add_edges_from(all_edges)
-    
-    #  Distance Graph
-    #teleport_edges = [(e.p_mediator, e.p_target) for e in architecture.teleport_edges]
     teleport_edges = []
+    # connect p1 neighbours to p2 neighbours
     for e in architecture.inter_core_edges:
-        # connect p1 neighbours to p2 neighbours
         for e_p1 in architecture.qubit_to_edges[e.p1]:
             neighbour_p1 = architecture.edges[e_p1].p1 if architecture.edges[e_p1].p1 != e.p1 else architecture.edges[e_p1].p2
             for e_p2 in architecture.qubit_to_edges[e.p2]:
                 neighbour_p2 = architecture.edges[e_p2].p1 if architecture.edges[e_p2].p1 != e.p2 else architecture.edges[e_p2].p2
                 teleport_edges.append((neighbour_p1, neighbour_p2))            
-    distance_graph = nx.Graph()
-    distance_graph.add_nodes_from(range(architecture.num_qubits))
-    distance_graph.add_edges_from(all_edges + teleport_edges)
+    
+    distance_graph = nx.empty_graph(architecture.num_qubits)
+    distance_graph.add_edges_from(basic_edges + teleport_edges)
     
     # Calculate all-pairs shortest path distances
-    dist = nx.floyd_warshall_numpy(distance_graph, nodelist=range(architecture.num_qubits))
+    return nx.floyd_warshall_numpy(distance_graph, nodelist=range(architecture.num_qubits))
+
+
+def sabre_mapping(circuit, architecture, seed=42, max_iterations=None):
+    np.random.seed(seed)
+    
+    # Initialize metrics
+    swap_count = 0
+    teleportation_count = 0
+    telegate_count = 0
+    circuit_depth = 0
+    
+    # Create mapping from DAG nodes to gates
+    node_to_gate = {node: circuit.gates[node] for node in circuit.dag.nodes}
+    
+    # Topological generations for debugging
+    print("Circuit layers:", list(nx.topological_generations(circuit.dag)))
+    
+    # Initialize layout
+    layout = initial_layout(circuit, architecture)
+    
+    # Create coupling map (undirected graph for connectivity checks)
+    basic_edges = [(e.p1, e.p2) for e in architecture.edges]
+    
+    coupling_graph = nx.empty_graph(architecture.num_qubits)
+    coupling_graph.add_edges_from(basic_edges)
+    
+    #  Distance Graph
+    global_distance_matrix = calculate_global_distance_matrix(architecture)
     
     # Intra-core distance
-    intracore_dist = nx.floyd_warshall_numpy(coupling_map, nodelist=range(architecture.num_qubits))
+    local_distance_matrix = nx.floyd_warshall_numpy(coupling_graph, nodelist=range(architecture.num_qubits))
     
     # Calculate a2a teleport paths
-    flat_graph = nx.Graph()
-    flat_graph.add_nodes_from(range(architecture.num_qubits))
-    inter_core_edges = [(e.p1, e.p2) for e in architecture.inter_core_edges]
-    flat_graph.add_edges_from(all_edges + inter_core_edges)
+    flat_graph = nx.empty_graph(architecture.num_qubits)
+    intercore_edges = [(e.p1, e.p2) for e in architecture.inter_core_edges]
+    flat_graph.add_edges_from(basic_edges + intercore_edges)
 
     interpaths = dict(nx.all_pairs_shortest_path(flat_graph)) 
     
-     
+    # Contracted graph for communication qubits
+    contracted_graph = nx.empty_graph(architecture.num_qubits)
+    for c in range(architecture.num_cores):
+        for p in architecture.core_comm_qubits[c]:
+            for p_ in architecture.core_comm_qubits[c]:
+                if p != p_:
+                    contracted_graph.add_edge(p, p_, weight=local_distance_matrix[p][p_])
+    contracted_graph.add_edges_from(intercore_edges, weight=1)
     
+    # Communication qubits nearest free qubits
+    nearest_free_to_comms_queues = {}
+    for p in architecture.communication_qubits:
+        nearest_free_to_comms_queues[p] = SparseBucketPriorityQueue()
+        core = architecture.get_qubit_core(p)
+        free_qubits = layout.get_free_qubits()
+        free_qubits_in_core = set(free_qubits) & set(architecture.core_qubits[core])
+        for free_p in free_qubits_in_core:
+            nearest_free_to_comms_queues[p].add_or_update(free_p, local_distance_matrix[p][free_p])
     
-    # Calculate weighted communication graph
-    if False:
-        comm_graph = nx.Graph()
-        comm_graph.add_nodes_from(architecture.communication_qubits)
-        for c in range(architecture.num_cores):
-            for p in architecture.core_comm_qubits[c]:
-                for p_ in architecture.core_comm_qubits[c]:
-                    if p != p_:
-                        comm_graph.add_edge(p, p_, weight=intracore_dist[p][p_], intra=True)
-        comm_graph.add_edges_from(inter_core_edges, weight=1, intra=False)
-        inter_comm_paths = dict(nx.all_pairs_all_shortest_paths(comm_graph))
-        print("Inter-core communication paths:", inter_comm_paths)
-        
-        max_length = 0
-        for p1 in architecture.communication_qubits:
-            for p2 in architecture.communication_qubits:
-                if p1 != p2:
-                    path = inter_comm_paths[p1][p2]
-                    if len(path) > max_length:
-                        max_length = len(path)
-        print("Max communication paths:", max_length)
-        quit()
-    
-    
-    
-    
+    # Other data for visualization
     arch_pos = nx.kamada_kawai_layout(flat_graph, pos=nx.planar_layout(flat_graph))
     circuit_pos = nx.multipartite_layout(circuit.dag, subset_key="layer")
     arch_data = {
@@ -235,8 +231,8 @@ def sabre_mapping(circuit, architecture, seed=42, max_iterations=None, visualize
             # Try to execute gates in the frontier that can be executed with current layout
             execute_gate_list = []
             for node in front:
-                gate = node_gate[node]
-                if layout.can_execute_gate(gate, coupling_map):
+                gate = node_to_gate[node]
+                if layout.can_execute_gate(gate, coupling_graph):
                     execute_gate_list.append(node)
         
             needed_paths = []
@@ -246,7 +242,7 @@ def sabre_mapping(circuit, architecture, seed=42, max_iterations=None, visualize
                     # Remove the node
                     dag.remove_node(node)
                     
-                    gate = node_gate[node]
+                    gate = node_to_gate[node]
                     if gate.is_two_qubit():
                         executed_gates.append([layout.get_phys(q) for q in gate.target_qubits])
                         executed_gates_nodes.append(node)
@@ -258,7 +254,7 @@ def sabre_mapping(circuit, architecture, seed=42, max_iterations=None, visualize
                 # SEPARATED GATES
             
                 # 1. Get gates with virt qubits in different cores
-                separated_pairs, separated_nodes = get_separated_virt_pairs(front, node_gate, layout) # virt
+                separated_pairs, separated_nodes = get_separated_virt_pairs(front, node_to_gate, layout) # virt
                 
                 # 2. Find shortest core path between qubits and the communication qubits in the path
                 # 3. Find nearest communication qubits to virt 1 and virt 2 and all the communication qubits in the path
@@ -272,7 +268,7 @@ def sabre_mapping(circuit, architecture, seed=42, max_iterations=None, visualize
                     needed_comm_qubits.extend(needed_comm_qubits_i)
                 
                 # 4. Find the nearest free qubit to the communication qubits
-                nearest_free_to_comms, nearest_free_to_comms_distances = get_nearest_free_qubits(layout, intracore_dist, needed_comm_qubits)
+                nearest_free_to_comms, nearest_free_to_comms_distances = get_nearest_free_qubits(layout, local_distance_matrix, needed_comm_qubits)
                 print("   separated_pairs", separated_pairs)
                 print("   nearest free distances", nearest_free_to_comms_distances)
                 print("   needed paths", needed_paths)
@@ -297,7 +293,7 @@ def sabre_mapping(circuit, architecture, seed=42, max_iterations=None, visualize
                             candidate_telegates_nodes.append(separated_nodes[i])
                     else:
                         needed_comm_qubits_g = [p for p in path if architecture.is_comm_qubit(p)]
-                        nearest_free_to_comms_g, _ = get_nearest_free_qubits(layout, intracore_dist, needed_comm_qubits_g)
+                        nearest_free_to_comms_g, _ = get_nearest_free_qubits(layout, local_distance_matrix, needed_comm_qubits_g)
                         phys_fwd_med, phys_fwd_tgt = nearest_free_to_comms_g[0], nearest_free_to_comms_g[1]
                         if path[0] == phys1 and path[1] == phys_fwd_med and layout.is_phys_free(phys_fwd_med) and \
                             layout.is_phys_free(phys_fwd_tgt) and layout.get_core_capacity(architecture.get_qubit_core(phys_fwd_tgt)) >= 2 and \
@@ -311,8 +307,8 @@ def sabre_mapping(circuit, architecture, seed=42, max_iterations=None, visualize
                             
                 # end SEPARATED GATES
                 
-                candidate_swaps = get_candidate_swaps(layout, coupling_map, front, node_gate)
-                candidate_swaps += get_candidate_swaps_comm_qubits(layout, coupling_map, nearest_free_to_comms)
+                candidate_swaps = get_candidate_swaps(layout, coupling_graph, front, node_to_gate)
+                candidate_swaps += get_candidate_swaps_comm_qubits(layout, coupling_graph, nearest_free_to_comms)
                 
                 scores = []
                 
@@ -321,7 +317,7 @@ def sabre_mapping(circuit, architecture, seed=42, max_iterations=None, visualize
                     temp_layout = deepcopy(layout)
                     temp_layout.swap(*swap)
                     decay = max(decay_factors[p] for p in swap)
-                    score = heuristic_score(dag, temp_layout, dist, decay, node_gate, interpaths, architecture, intracore_dist)
+                    score = calculate_energy(dag, temp_layout, global_distance_matrix, decay, node_to_gate, interpaths, architecture, local_distance_matrix)
                     scores.append(score)
                 print(f"   Swap scores: {list(map(lambda x: float(round(x,2)), scores))}")
                 
@@ -330,14 +326,14 @@ def sabre_mapping(circuit, architecture, seed=42, max_iterations=None, visualize
                     temp_layout = deepcopy(layout)
                     temp_layout.teleport(*teleport)
                     decay = max(decay_factors[p] for p in teleport)
-                    score = heuristic_score(dag, temp_layout, dist, decay, node_gate, interpaths, architecture, intracore_dist) - 100
+                    score = calculate_energy(dag, temp_layout, global_distance_matrix, decay, node_to_gate, interpaths, architecture, local_distance_matrix) - 100
                     scores.append(score)
                 if candidate_teleports:
                     print(f"    Teleport scores: {list(map(lambda x: float(round(x,2)), scores[-len(candidate_teleports):]))}")
                 
                 # Current score (apply telegate if any)
                 if candidate_telegates:
-                    scores.append(heuristic_score(dag, layout, dist, 1, node_gate, interpaths, architecture, intracore_dist)- 1000)
+                    scores.append(calculate_energy(dag, layout, global_distance_matrix, 1, node_to_gate, interpaths, architecture, local_distance_matrix)- 1000)
                     print(f"    Telegate score: {scores[-1]:.2f}")
                 
                 # Find best swap (lowest score)
@@ -350,7 +346,7 @@ def sabre_mapping(circuit, architecture, seed=42, max_iterations=None, visualize
                 
                 if best_op_idx < len(candidate_swaps):
                     phys1, phys2 = candidate_swaps[best_op_idx]
-                    assert coupling_map.has_edge(phys1, phys2)
+                    assert coupling_graph.has_edge(phys1, phys2)
                     layout.swap(phys1, phys2)
                     decay_factors[phys1] += 0.001
                     decay_factors[phys2] += 0.001
@@ -378,7 +374,7 @@ def sabre_mapping(circuit, architecture, seed=42, max_iterations=None, visualize
             
             # Debugging output
             print(f"  Remaining nodes: {len(dag)}, Swaps: {swap_count}, "
-                f"Front: {[node_gate[node].target_qubits for node in front]}, "
+                f"Front: {[node_to_gate[node].target_qubits for node in front]}, "
                 f"Last swap: {list(map(int,last_op))}" if last_op is not None else "")
             
             # Periodically reset decay factors
@@ -401,7 +397,7 @@ def sabre_mapping(circuit, architecture, seed=42, max_iterations=None, visualize
                 'applied_gates': executed_gates,
                 'applied_ops': executed_ops,
                 'needed_paths': needed_paths,
-                'energy': heuristic_score(dag, layout, dist, 1, node_gate, interpaths, architecture, intracore_dist)
+                'energy': calculate_energy(dag, layout, global_distance_matrix, 1, node_to_gate, interpaths, architecture, local_distance_matrix)
             })
             
             if iteration % 10 == 0:
@@ -415,14 +411,3 @@ def sabre_mapping(circuit, architecture, seed=42, max_iterations=None, visualize
         json.dump({"architecture": arch_data, "circuit": circuit_data, "iterations": iterations_data}, f, cls=NpEncoder)
     return swap_count, teleportation_count, telegate_count, circuit_depth
 
-
-
-class NpEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, np.integer):
-            return int(obj)
-        if isinstance(obj, np.floating):
-            return float(obj)
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        return super(NpEncoder, self).default(obj)
