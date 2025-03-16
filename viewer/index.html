@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SVG Zoom</title>
+    <link rel="stylesheet" href="style.css">
+    <script src='https://unpkg.com/panzoom@9.4.0/dist/panzoom.min.js'></script>
+</head>
+
+<body>
+    <main>
+    <header>
+        TeleSABRE Iterations Viewer
+    </header>
+    <div class="content" id="container">
+        <div id="glass" class="glass"></div>
+        <section class="layout-section">
+            <div id="layout-scene">
+                <svg>
+                </svg>
+            </div>
+        </section>
+        <section class="dag-section">
+            <div id="dag-scene">
+                <svg>
+                </svg>
+            </div>
+        </section>
+</div>
+    <footer>
+        <div class="controls-container">
+            <button id="prev-it">⏮</button>
+            <button id="next-it">⏭</button>
+            <button id="playPause">▶</button>
+            <input type="number" id="interval" value="0.1" min="0" step="0.1"> s
+        </div>
+        <div class="slider-container">
+            <input type="range" min="1" max="100" value="0" class="slider slider-progress" id="iteration-slider">
+        </div>
+        <div class="iteration-container">
+            Iteration: <span id="iteration">0</span>
+        </div>
+        <div class="iteration-container">
+            Energy: <span id="energy">0</span>
+        </div>
+    </footer>
+    </main>
+
+    <script src='script.js' defer></script>
+</body>
+
+</html>
