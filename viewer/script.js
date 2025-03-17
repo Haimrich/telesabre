@@ -30,7 +30,7 @@ function renderIteration(iteration) {
     console.log(data.iterations[iteration]);
 
     document.getElementById('iteration').textContent = iteration;
-    document.getElementById('energy').textContent = data.iterations[iteration].energy;
+    document.getElementById('energy').textContent = data.iterations[iteration].energy.toFixed(3);
 
     const num_virt_qubits = data.circuit.num_qubits;
     for (let i = 0; i < nodes.length; i++) {
@@ -123,6 +123,71 @@ function renderIteration(iteration) {
         const j = data.iterations[iteration].front[i];
         gates[j].style.opacity = 1;
     }
+
+
+    // Candidate list
+    candidate_list = document.getElementById('candidate-list');
+    while (candidate_list.children.length > 1) {
+        candidate_list.removeChild(candidate_list.lastChild);
+    }
+
+    let ops = data.iterations[iteration].candidate_ops;
+    let scores = data.iterations[iteration].candidate_ops_scores;
+    console.log(scores)
+
+    for (let i = 0; i < ops.length; i++) {
+        const op = ops[i];
+        let li = document.createElement('li');
+
+        li.dataset.op = JSON.stringify(op);
+
+        const candidate_div = document.createElement('div');
+        candidate_div.textContent = op;
+        li.appendChild(candidate_div);
+
+        const type_div = document.createElement('div');
+        if (op.length == 2) {
+            type_div.textContent = "Swap";
+            li.classList.add('swap');
+        } else if (op.length == 3) {
+            type_div.textContent = "Teleport";
+            li.classList.add('teleport');
+        } else {
+            type_div.textContent = "Telegate";
+            li.classList.add('telegate');
+        }
+        li.appendChild(type_div);
+
+        const score_div = document.createElement('div');
+        score_div.textContent = scores[i].toFixed(3);
+        li.appendChild(score_div);
+
+
+        li.addEventListener('mouseover', (event) => {
+            const op = JSON.parse(event.currentTarget.dataset.op);
+            let color = "black";
+            for (let i = 0; i < op.length - 1; i++) {
+                const e = edge_to_id[[op[i], op[i+1]]]
+                edges[e].dataset.stroke = edges[e].style.stroke;
+                edges[e].dataset.strokeWidth = edges[e].style.strokeWidth;
+                edges[e].style.stroke = color;
+                edges[e].style.strokeWidth = 5;
+            }
+        });
+
+        li.addEventListener('mouseout', (event) => {
+            const op = JSON.parse(event.currentTarget.dataset.op);
+            for (let i = 0; i < op.length - 1; i++) {
+                const e = edge_to_id[[op[i], op[i+1]]]
+                edges[e].style.stroke = edges[e].dataset.stroke;
+                edges[e].style.strokeWidth = edges[e].dataset.strokeWidth;
+            }
+        });
+
+        candidate_list.appendChild(li);
+
+
+    }
 }
 
 function setupScenes() {
@@ -139,9 +204,13 @@ function setupScenes() {
     colors = generateNiceColors(num_virt_qubits);
 
     // Qubits
+    const min_qubit_x = Math.min(...arch_data.node_positions.map(x => parseFloat(x[0])));
+    const min_qubit_y = Math.min(...arch_data.node_positions.map(x => parseFloat(x[1])));
+
+
     for (let p = 0; p < num_qubits; p++) {
-        const x = arch_data.node_positions[p][0] * POS_SCALE + POS_SCALE * 1.5;
-        const y = arch_data.node_positions[p][1] * POS_SCALE + POS_SCALE * 1.5;
+        const x = (arch_data.node_positions[p][0] - min_qubit_x + 0.2) * POS_SCALE;
+        const y = (arch_data.node_positions[p][1] - min_qubit_y + 0.2) * POS_SCALE; 
 
         let newQubit = document.createElementNS("http://www.w3.org/2000/svg", 'circle');
         newQubit.setAttribute("cx", x); 
@@ -150,6 +219,9 @@ function setupScenes() {
         newQubit.style.fill = "white";
         newQubit.style.stroke = "black";
         newQubit.style.strokeWidth = "1";
+        newQubitTitle = document.createElementNS("http://www.w3.org/2000/svg", 'title');
+        newQubitTitle.textContent = p;
+        newQubit.appendChild(newQubitTitle);
         nodes.push(newQubit);
         nodes_coordiantes.push([x, y])
 
@@ -347,9 +419,9 @@ function setupScenes() {
     // Slider
 
     let slider = document.querySelector('#iteration-slider')
-    slider.max = data.iterations.length
-    slider.min = 1
-    slider.value = 1
+    slider.max = data.iterations.length - 1
+    slider.min = 0
+    slider.value = 0
     console.log('Iterations', data.iterations.length)
 
     slider.addEventListener('change', (event) => {

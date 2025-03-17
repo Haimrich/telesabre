@@ -67,6 +67,8 @@ class Architecture:
         self.num_edges = len(self.edges)
         self.num_tp_edges = len(self.teleport_edges)
         
+        self.communication_qubits = list(set(self.communication_qubits))
+        
         self.core_comm_qubits = [[] for _ in range(self.num_cores)]
         for p in self.communication_qubits:
             self.core_comm_qubits[self.qubit_to_core[p]].append(p)
