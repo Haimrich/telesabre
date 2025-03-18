@@ -10,22 +10,6 @@ from utils import NpEncoder, SparseBucketPriorityQueue
 from plotting import plot_iteration
 
 
-def get_candidate_swaps(layout, coupling_map, front, node_gate):
-    # Get physical qubits used by gates in the frontier
-    used_phys = {layout.get_phys(virt) for node in front for virt in node_gate[node].target_qubits}
-    
-    # Get all edges in the coupling map that involve used physical qubits
-    candidate_swaps_phys = list(coupling_map.edges(used_phys))
-      
-    return candidate_swaps_phys
-
-
-def get_candidate_swaps_comm_qubits(layout, coupling_map, needed_comm_qubits):
-    """Get candidate swaps for needed communications qubits."""
-    candidate_swaps = list(coupling_map.edges(needed_comm_qubits))
-    return candidate_swaps
-
-
 
 def get_separated_virt_pairs(front, node_gate, layout):
     separated_pairs = []
@@ -55,12 +39,14 @@ def get_nearest_free_qubits(layout, dist_matrix, target_qubits):
 
 def calculate_energy(dag, architecture, layout, nearest_free_to_comms_queues, decay, node_to_gate, local_distance_matrix, full_core_penalty):
     energy = 0
+    future_energy = 0
+    front_energy = 0
     
-   
     # Calculate weighted score using exponential decay based on depth
     for depth, layer in enumerate(nx.topological_generations(dag)):
-        lookahead_factor = 0.1 ** (depth/2)
+        lookahead_factor = 0.1 ** (depth/5) if depth > 0 else 100
         #lookahead_factor = 1 if depth == 0 else 0
+        traffic = {}
         for node in layer:
             if node_to_gate[node].is_two_qubit():
                 virt1, virt2 = node_to_gate[node].target_qubits
@@ -69,17 +55,32 @@ def calculate_energy(dag, architecture, layout, nearest_free_to_comms_queues, de
                 if core1 == core2:
                     distance = local_distance_matrix[phys1][phys2]
                     energy += distance * lookahead_factor  # Apply exponential decay with depth
+                    if depth != 0:
+                        future_energy += distance * lookahead_factor
+                    else:
+                        front_energy += distance * lookahead_factor
                 else:
                     virts = node_to_gate[node].target_qubits
-                    contracted_graph_g = build_contracted_graph_for_virt_pair(architecture, layout, nearest_free_to_comms_queues, local_distance_matrix, full_core_penalty, virts)
+                    contracted_graph_g = build_contracted_graph_for_virt_pair(architecture, layout, nearest_free_to_comms_queues, local_distance_matrix, full_core_penalty, virts, traffic=traffic)
                     shortest_path = nx.shortest_path(contracted_graph_g, source=phys1, target=phys2, weight='weight')
+                    for edge in zip(shortest_path[:-1], shortest_path[1:]):
+                        if not architecture.is_comm_qubit(edge[0]) or not architecture.is_comm_qubit(edge[1]):
+                            continue
+                        if edge in traffic:
+                            traffic[edge] += 1
+                        else:
+                            traffic[edge] = 1
                     distance = sum(contracted_graph_g.edges[edge]['weight'] for edge in zip(shortest_path[:-1], shortest_path[1:]))
                     energy += distance * lookahead_factor
+                    if depth != 0:
+                        future_energy += distance * lookahead_factor
+                    else:
+                        front_energy += distance * lookahead_factor
     
     # Apply decay factor to score
     energy *= decay
                 
-    return energy
+    return energy, front_energy, future_energy
 
 
 def initial_layout(circuit, architecture):
@@ -119,7 +120,7 @@ def calculate_global_distance_matrix(architecture):
 
 
 
-def build_contracted_graph_for_virt_pair(architecture, layout, nearest_free_to_comms_queues, local_distance_matrix, full_core_penalty, pair, pos=None):
+def build_contracted_graph_for_virt_pair(architecture, layout, nearest_free_to_comms_queues, local_distance_matrix, full_core_penalty, pair, traffic=None):
     """
     Build a contracted graph for a pair of separated virtual qubits.
     TODO - Avoid building the whole thing everytime? (performance)
@@ -136,18 +137,18 @@ def build_contracted_graph_for_virt_pair(architecture, layout, nearest_free_to_c
                     weight = local_distance_matrix[p][p_]
                     contracted_graph.add_edge(p, p_, weight=weight)
                     
-    contracted_graph.add_edges_from(intercore_edges, weight=1)
+    contracted_graph.add_edges_from(intercore_edges, weight=2)
     
     # start and end edges
     phys1, phys2 = layout.get_phys(virt1), layout.get_phys(virt2)
     core1, core2 = architecture.get_qubit_core(phys1), architecture.get_qubit_core(phys2)
 
     for p_comm in architecture.core_comm_qubits[core1]:
-        weight = abs(local_distance_matrix[phys1][p_comm]-1)
+        weight = local_distance_matrix[phys1][p_comm]
         contracted_graph.add_edge(phys1, p_comm, weight=weight)
         
     for p_comm in architecture.core_comm_qubits[core2]:
-        weight = abs(local_distance_matrix[phys2][p_comm]-1)
+        weight = local_distance_matrix[phys2][p_comm]
         contracted_graph.add_edge(phys2, p_comm, weight=weight)
         
     # add full core penalty and nearest free qubit penalty
@@ -159,15 +160,22 @@ def build_contracted_graph_for_virt_pair(architecture, layout, nearest_free_to_c
                 contracted_graph.edges[edge]['weight'] += nearest_free_to_comms_queues[p_comm].get_min_priority() / 2
             else:
                 contracted_graph.edges[edge]['weight'] += nearest_free_to_comms_queues[p_comm].get_min_priority()
+                
+                
+    # add penalty for gte on comm
+    if architecture.is_comm_qubit(phys1):
+        for edge in contracted_graph.edges(phys1):
+            if architecture.get_qubit_core(edge[1]) != architecture.get_qubit_core(edge[0]):
+                contracted_graph.edges[edge]['weight'] += 1
+    if architecture.is_comm_qubit(phys2):
+        for edge in contracted_graph.edges(phys2):
+            if architecture.get_qubit_core(edge[1]) != architecture.get_qubit_core(edge[0]):
+                contracted_graph.edges[edge]['weight'] += 1
 
-    if pos is not None:
-        import matplotlib.pyplot as plt
-        fig, ax = plt.subplots()
-        nx.draw(contracted_graph, pos=pos, ax=ax)
-        edge_weights = nx.get_edge_attributes(contracted_graph, 'weight')
-        nx.draw_networkx_edge_labels(contracted_graph, pos, edge_labels=edge_weights, ax=ax)
-        fig.savefig("contracted.png")
-        plt.close()
+    # add traffic
+    if traffic is not None:
+        for edge, weight in traffic.items():
+            contracted_graph.edges[edge]['weight'] += weight
 
     return contracted_graph
 
@@ -217,7 +225,6 @@ def sabre_mapping(circuit, architecture, seed=42, max_iterations=None):
             nearest_free_to_comms_queues[p].add_or_update(free_p, local_distance_matrix[p][free_p])
     
     # Other data for visualization
-    arch_pos = nx.kamada_kawai_layout(flat_graph, pos=nx.planar_layout(flat_graph) if nx.is_planar(flat_graph) else None)
     arch_pos = nx.nx_pydot.graphviz_layout(flat_graph)
     arch_pos = nx.kamada_kawai_layout(flat_graph, pos=arch_pos)
     circuit_pos = nx.multipartite_layout(circuit.dag, subset_key="layer")
@@ -270,8 +277,12 @@ def sabre_mapping(circuit, architecture, seed=42, max_iterations=None):
             
             candidate_swaps = []
             candidate_teleports = []
+            candidate_telegates_nodes = []
             candidate_telegates = []
+            
             scores = []
+            front_scores = []
+            future_scores = []
             
             print("Iteration", iteration)
             
@@ -305,7 +316,7 @@ def sabre_mapping(circuit, architecture, seed=42, max_iterations=None):
                 # Build contracted communication graph for each pair of separated gates
                 shortest_paths = []
                 for i, virts in enumerate(separated_pairs):
-                    contracted_graph_g = build_contracted_graph_for_virt_pair(architecture, layout, nearest_free_to_comms_queues, local_distance_matrix, full_core_penalty, virts, pos=None) # arch_pos
+                    contracted_graph_g = build_contracted_graph_for_virt_pair(architecture, layout, nearest_free_to_comms_queues, local_distance_matrix, full_core_penalty, virts)
                     shortest_path = nx.shortest_path(contracted_graph_g, layout.get_phys(virts[0]), layout.get_phys(virts[1]), weight='weight')
                     shortest_paths.append(shortest_path)
                                         
@@ -332,9 +343,6 @@ def sabre_mapping(circuit, architecture, seed=42, max_iterations=None):
                 # già fatto perchè la dist_matrix tiene conto
                 
                 # check if telegate or teleport is possible and choose the best one in terms of energy
-                candidate_telegates = []
-                candidate_telegates_nodes = []
-                candidate_teleports = []
                 for i, (virt1, virt2) in enumerate(separated_pairs):
                     phys1, phys2 = layout.get_phys(virt1), layout.get_phys(virt2)
                     path = shortest_paths[i]
@@ -343,29 +351,25 @@ def sabre_mapping(circuit, architecture, seed=42, max_iterations=None):
                         assert phys1 == phys_g1 and phys2 == phys_g2
                         if layout.is_phys_free(phys_m1) and layout.is_phys_free(phys_m2) and \
                             architecture.is_comm_qubit(phys_m1) and architecture.is_comm_qubit(phys_m2) and \
-                                not architecture.is_comm_qubit(phys_g1) and not architecture.is_comm_qubit(phys_g2):
+                                coupling_graph.has_edge(phys1, phys_m1) and coupling_graph.has_edge(phys_m2, phys2):
                             candidate_telegates.append((phys_g1, phys_m1, phys_m2, phys_g2))
                             candidate_telegates_nodes.append(separated_nodes[i])
-                    else:
-                        needed_comm_qubits_g = [p for p in path if architecture.is_comm_qubit(p)]
-                        nearest_free_to_comms_g = [nearest_free_to_comms_queues[p_comm].get_min() for p_comm in needed_comm_qubits_g]
-                        phys_fwd_med, phys_fwd_tgt = nearest_free_to_comms_g[0], nearest_free_to_comms_g[1]
-                        if path[0] == phys1 and path[1] == phys_fwd_med and layout.is_phys_free(phys_fwd_med) and \
-                            layout.is_phys_free(phys_fwd_tgt) and layout.get_core_capacity(architecture.get_qubit_core(phys_fwd_tgt)) >= 2 and \
-                                architecture.is_comm_qubit(phys_fwd_tgt) and architecture.is_comm_qubit(phys_fwd_med):
-                            candidate_teleports.append((phys1, phys_fwd_med, phys_fwd_tgt))
-                        phys_bwd_med, phys_bwd_tgt = nearest_free_to_comms_g[-1], nearest_free_to_comms_g[-2]
-                        if path[-1] == phys2 and path[-2] == phys_bwd_med and layout.is_phys_free(phys_bwd_med) and \
-                            layout.is_phys_free(phys_bwd_tgt) and layout.get_core_capacity(architecture.get_qubit_core(phys_bwd_tgt)) >= 2 and \
-                                architecture.is_comm_qubit(phys_bwd_tgt) and architecture.is_comm_qubit(phys_bwd_med):
-                            candidate_teleports.append((phys2, phys_bwd_med, phys_bwd_tgt))
+                
+                    needed_comm_qubits_g = [p for p in path if architecture.is_comm_qubit(p)]
+                    phys_fwd_med, phys_fwd_tgt = needed_comm_qubits_g[0], needed_comm_qubits_g[1]
+                    if path[0] == phys1 and path[1] == phys_fwd_med and layout.is_phys_free(phys_fwd_med) and coupling_graph.has_edge(path[0], path[1]) and \
+                        layout.is_phys_free(phys_fwd_tgt) and layout.get_core_capacity(architecture.get_qubit_core(phys_fwd_tgt)) >= 2:
+                        candidate_teleports.append((phys1, phys_fwd_med, phys_fwd_tgt))
+                    phys_bwd_med, phys_bwd_tgt = needed_comm_qubits_g[-1], needed_comm_qubits_g[-2]
+                    if path[-1] == phys2 and path[-2] == phys_bwd_med and layout.is_phys_free(phys_bwd_med) and coupling_graph.has_edge(path[-1], path[-2]) and \
+                        layout.is_phys_free(phys_bwd_tgt) and layout.get_core_capacity(architecture.get_qubit_core(phys_bwd_tgt)) >= 2:
+                        candidate_teleports.append((phys2, phys_bwd_med, phys_bwd_tgt))
                             
                 # === End separated gates ===
                 
-                candidate_swaps = get_candidate_swaps(layout, coupling_graph, front, node_to_gate)
-                candidate_swaps += get_candidate_swaps_comm_qubits(layout, coupling_graph, nearest_free_to_comms)
-                
-                scores = []
+                # Candidate Swaps are swaps involving a phys qubit in the frontier or nearest free to comm qubits
+                front_phys = {layout.get_phys(virt) for node in front for virt in node_to_gate[node].target_qubits}
+                candidate_swaps = list(edge for edge in coupling_graph.edges(set(nearest_free_to_comms).union(front_phys)) if not layout.is_phys_free(edge[0]) or not layout.is_phys_free(edge[1]))
                 
                 # Calculate scores for each candidate swap
                 for i, swap in enumerate(candidate_swaps):
@@ -373,19 +377,23 @@ def sabre_mapping(circuit, architecture, seed=42, max_iterations=None):
                     temp_layout.swap(*swap)
                     
                     temp_nearest_free_to_comms_queues = deepcopy(nearest_free_to_comms_queues)
-                    phys1, phys2 = swap
-                    if temp_layout.is_phys_free(phys1):
-                        core = architecture.get_qubit_core(phys1)
-                        for p_comm in architecture.core_comm_qubits[core]:
+                    phys1, phys2 = swap      
+                    core = architecture.get_qubit_core(phys1) # should be same core phys2
+                    for p_comm in architecture.core_comm_qubits[core]:
+                        if temp_layout.is_phys_free(phys1):
                             temp_nearest_free_to_comms_queues[p_comm].add_or_update(phys1, local_distance_matrix[p_comm][phys1])
-                    if temp_layout.is_phys_free(phys2):
-                        core = architecture.get_qubit_core(phys2)
-                        for p_comm in architecture.core_comm_qubits[core]:
+                        else:
+                            temp_nearest_free_to_comms_queues[p_comm].remove_item(phys1)
+                        if temp_layout.is_phys_free(phys2):
                             temp_nearest_free_to_comms_queues[p_comm].add_or_update(phys2, local_distance_matrix[p_comm][phys2])
+                        else:
+                            temp_nearest_free_to_comms_queues[p_comm].remove_item(phys2)
                     
                     decay = max(decay_factors[p] for p in swap)
-                    score = calculate_energy(dag, architecture, temp_layout, temp_nearest_free_to_comms_queues, decay, node_to_gate, local_distance_matrix, full_core_penalty)
+                    score, front_energy, future_energy = calculate_energy(dag, architecture, temp_layout, temp_nearest_free_to_comms_queues, decay, node_to_gate, local_distance_matrix, full_core_penalty)
                     scores.append(score)
+                    front_scores.append(front_energy)
+                    future_scores.append(future_energy)
                 print(f"   Swap scores: {list(map(lambda x: float(round(x,2)), scores))}")
                 
                 # Calculate scores for each candidate teleport
@@ -402,10 +410,12 @@ def sabre_mapping(circuit, architecture, seed=42, max_iterations=None):
                     core_source = architecture.get_qubit_core(phys_source)
                     for p_comm in architecture.core_comm_qubits[core_source]:
                         temp_nearest_free_to_comms_queues[p_comm].add_or_update(phys_source, local_distance_matrix[p_comm][phys_source])
-                    
+                        
                     decay = max(decay_factors[p] for p in teleport)
-                    score = calculate_energy(dag, architecture, temp_layout, temp_nearest_free_to_comms_queues, decay, node_to_gate, local_distance_matrix, full_core_penalty) - 100
+                    score, front_energy, future_energy = calculate_energy(dag, architecture, temp_layout, temp_nearest_free_to_comms_queues, decay, node_to_gate, local_distance_matrix, full_core_penalty)
                     scores.append(score)
+                    front_scores.append(front_energy)
+                    future_scores.append(future_energy)
                     
                 if candidate_teleports:
                     print(f"    Teleport scores: {list(map(lambda x: float(round(x,2)), scores[-len(candidate_teleports):]))}")
@@ -413,7 +423,10 @@ def sabre_mapping(circuit, architecture, seed=42, max_iterations=None):
                 # Current score (apply telegate if any)
                 if candidate_telegates:
                     decay = 1 # capiamo
-                    scores.append(calculate_energy(dag, architecture, temp_layout, temp_nearest_free_to_comms_queues, decay, node_to_gate, local_distance_matrix, full_core_penalty) - 1000)
+                    score, front_energy, future_energy = calculate_energy(dag, architecture, temp_layout, temp_nearest_free_to_comms_queues, decay, node_to_gate, local_distance_matrix, full_core_penalty)
+                    scores.append(score - 1000)
+                    front_scores.append(front_energy)
+                    future_scores.append(future_energy)
                     print(f"    Telegate score: {scores[-1]:.2f}")
                 
                 # Find best swap (lowest score)
@@ -483,7 +496,7 @@ def sabre_mapping(circuit, architecture, seed=42, max_iterations=None):
             
             # Periodically reset decay factors
             reset_counter -= 1
-            if reset_counter == 0 or True:
+            if reset_counter == 0:
                 reset_counter = 5
                 decay_factors = [1.0] * architecture.num_qubits
 
@@ -492,6 +505,8 @@ def sabre_mapping(circuit, architecture, seed=42, max_iterations=None):
             candidate_ops = candidate_swaps + candidate_teleports + candidate_telegates
             # sort by score
             candidate_ops = [op for _, op in sorted(zip(scores, candidate_ops))]
+            future_scores = [op for _, op in sorted(zip(scores, future_scores))]
+            front_scores = [op for _, op in sorted(zip(scores, front_scores))]
             scores = sorted(scores)
             
             iterations_data.append({
@@ -508,7 +523,9 @@ def sabre_mapping(circuit, architecture, seed=42, max_iterations=None):
                 'needed_paths': needed_paths,
                 'energy': calculate_energy(dag, architecture, layout, nearest_free_to_comms_queues, 1, node_to_gate, local_distance_matrix, full_core_penalty),
                 'candidate_ops': candidate_ops,
-                'candidate_ops_scores': scores
+                'candidate_ops_scores': scores,
+                'candidate_ops_front_scores': front_scores,
+                'candidate_ops_future_scores': future_scores
             })
             
             if iteration % 10 == 0:

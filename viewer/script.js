@@ -30,7 +30,7 @@ function renderIteration(iteration) {
     console.log(data.iterations[iteration]);
 
     document.getElementById('iteration').textContent = iteration;
-    document.getElementById('energy').textContent = data.iterations[iteration].energy.toFixed(3);
+    document.getElementById('energy').textContent = data.iterations[iteration].energy[0].toFixed(3);
 
     const num_virt_qubits = data.circuit.num_qubits;
     for (let i = 0; i < nodes.length; i++) {
@@ -93,8 +93,9 @@ function renderIteration(iteration) {
         const path = data.iterations[iteration].needed_paths[i];
         console.log(path);
         for (let j = 0; j < path.length - 1; j++) {
-            const e = edge_to_id[[path[j], path[j+1]]];
-            needed_edges[e].style.opacity = 1;
+            //const e = edge_to_id[[path[j], path[j+1]]];
+            //needed_edges[e].style.opacity = 1;
+            // TODO update for contracted graph
         }
     }
 
@@ -127,66 +128,77 @@ function renderIteration(iteration) {
 
     // Candidate list
     candidate_list = document.getElementById('candidate-list');
-    while (candidate_list.children.length > 1) {
-        candidate_list.removeChild(candidate_list.lastChild);
-    }
 
     let ops = data.iterations[iteration].candidate_ops;
     let scores = data.iterations[iteration].candidate_ops_scores;
+    let front_scores = data.iterations[iteration].candidate_ops_front_scores;
+    let future_scores = data.iterations[iteration].candidate_ops_future_scores;
     console.log(scores)
+
+
+    for (let i = 1; i < candidate_list.children.length; i++) {
+        candidate_list.children[i].style.opacity = 0;
+    }
 
     for (let i = 0; i < ops.length; i++) {
         const op = ops[i];
-        let li = document.createElement('li');
-
-        li.dataset.op = JSON.stringify(op);
-
-        const candidate_div = document.createElement('div');
-        candidate_div.textContent = op;
-        li.appendChild(candidate_div);
-
-        const type_div = document.createElement('div');
-        if (op.length == 2) {
-            type_div.textContent = "Swap";
-            li.classList.add('swap');
-        } else if (op.length == 3) {
-            type_div.textContent = "Teleport";
-            li.classList.add('teleport');
+        
+        let li;
+        if (i < candidate_list.children.length - 1) {
+            li = candidate_list.children[i + 1];
+            li.style.opacity = 1;
         } else {
-            type_div.textContent = "Telegate";
-            li.classList.add('telegate');
+            li = document.createElement('li');
+            const candidate_div = document.createElement('div');
+            li.appendChild(candidate_div);
+            const type_div = document.createElement('div');
+            li.appendChild(type_div);
+            const score_div = document.createElement('div');
+            li.appendChild(score_div);
+            const front_score_div = document.createElement('div');
+            li.appendChild(front_score_div);
+            const future_score_div = document.createElement('div');
+            li.appendChild(future_score_div);
+
+            li.addEventListener('mouseover', (event) => {
+                const op = JSON.parse(event.currentTarget.dataset.op);
+                let color = "black";
+                for (let i = 0; i < op.length - 1; i++) {
+                    const e = edge_to_id[[op[i], op[i+1]]]
+                    edges[e].dataset.stroke = edges[e].style.stroke;
+                    edges[e].dataset.strokeWidth = edges[e].style.strokeWidth;
+                    edges[e].style.stroke = color;
+                    edges[e].style.strokeWidth = 5;
+                }
+            });
+
+            li.addEventListener('mouseout', (event) => {
+                const op = JSON.parse(event.currentTarget.dataset.op);
+                for (let i = 0; i < op.length - 1; i++) {
+                    const e = edge_to_id[[op[i], op[i+1]]]
+                    edges[e].style.stroke = edges[e].dataset.stroke;
+                    edges[e].style.strokeWidth = edges[e].dataset.strokeWidth;
+                }
+            });
+
+            candidate_list.appendChild(li);
         }
-        li.appendChild(type_div);
 
-        const score_div = document.createElement('div');
-        score_div.textContent = scores[i].toFixed(3);
-        li.appendChild(score_div);
-
-
-        li.addEventListener('mouseover', (event) => {
-            const op = JSON.parse(event.currentTarget.dataset.op);
-            let color = "black";
-            for (let i = 0; i < op.length - 1; i++) {
-                const e = edge_to_id[[op[i], op[i+1]]]
-                edges[e].dataset.stroke = edges[e].style.stroke;
-                edges[e].dataset.strokeWidth = edges[e].style.strokeWidth;
-                edges[e].style.stroke = color;
-                edges[e].style.strokeWidth = 5;
-            }
-        });
-
-        li.addEventListener('mouseout', (event) => {
-            const op = JSON.parse(event.currentTarget.dataset.op);
-            for (let i = 0; i < op.length - 1; i++) {
-                const e = edge_to_id[[op[i], op[i+1]]]
-                edges[e].style.stroke = edges[e].dataset.stroke;
-                edges[e].style.strokeWidth = edges[e].dataset.strokeWidth;
-            }
-        });
-
-        candidate_list.appendChild(li);
-
-
+        li.dataset.op = JSON.stringify(op);        
+        li.children[0].textContent = op;
+        if (op.length == 2) {
+            li.children[1].textContent = "Swap";
+            li.children[1].classList.add('swap');
+        } else if (op.length == 3) {
+            li.children[1].textContent = "Teleport";
+            li.children[1].classList.add('teleport');
+        } else {
+            li.children[1].textContent = "Telegate";
+            li.children[1].classList.add('telegate');
+        }
+        li.children[2].textContent = scores[i].toFixed(3);
+        li.children[3].textContent = front_scores[i].toFixed(3);
+        li.children[4].textContent = future_scores[i].toFixed(3);
     }
 }
 
@@ -566,6 +578,7 @@ for (let e of document.querySelectorAll('input[type="range"].slider-progress')) 
       autoPlay = setInterval(() => {
           slider.stepUp();
           slider.dispatchEvent(new Event("change"));
+          if (slider.value == slider.max) stopAutoPlay();
       }, interval);
       isPlaying = true;
       playPauseBtn.textContent = '❚❚';
@@ -603,9 +616,11 @@ for (let e of document.querySelectorAll('input[type="range"].slider-progress')) 
 
 document.addEventListener('keydown', (event) => {
     if (event.key === 'ArrowRight') {
+        stopAutoPlay();
         slider.stepUp();
         slider.dispatchEvent(new Event("change"));
     } else if (event.key === 'ArrowLeft') {
+        stopAutoPlay();
         slider.stepDown();
         slider.dispatchEvent(new Event("change"));
     } else if (event.key === ' ') {

@@ -20,12 +20,17 @@ main {
   display: flex;
   flex-direction: column;
   flex: 1;
+  height: 100%;
+  min-height: 0;
 }
 
 .content {
   display: flex;
   flex: 1;
   flex-direction: row;
+  height: 100%;
+  min-height: 0;
+  align-items: stretch;
 }
 
 .dag-section,
@@ -152,10 +157,11 @@ text {
 /* Candidate list */
 
 .candidate-section {
-  width: 200px;
+  width: 380px;
   border-right: 2px solid #eee;
   font-size: 10px;
   color: gray;
+  overflow-y: scroll; 
 }
 
 .candidate-section div {
@@ -166,8 +172,8 @@ text {
   flex-grow: 1;
 }
 
-.candidate-section li div:nth-child(2), .candidate-section li div:nth-child(3) {
-  width: 50px;
+.candidate-section li div:nth-child(2), .candidate-section li div:nth-child(3), .candidate-section li div:nth-child(4), .candidate-section li div:nth-child(5)  {
+  width: 74px;
 }
 
 #candidate-list li:first-child {

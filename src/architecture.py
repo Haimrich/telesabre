@@ -202,6 +202,16 @@ class Architecture:
         arch._update_qubit_to_edges()
         arch._build_teleport_edges()
         
+        arch.communication_qubits = list(set(arch.communication_qubits))
+        
+        arch.core_comm_qubits = [[] for _ in range(arch.num_cores)]
+        for p in arch.communication_qubits:
+            arch.core_comm_qubits[arch.qubit_to_core[p]].append(p)
+            
+        arch.core_qubits = [[] for _ in range(arch.num_cores)]
+        for p in range(arch.num_qubits):
+            arch.core_qubits[arch.qubit_to_core[p]].append(p)
+        
         return arch
     
     @staticmethod
@@ -215,6 +225,16 @@ class Architecture:
         
         arch._update_qubit_to_edges
         arch._build_teleport_edges()
+        
+        arch.communication_qubits = list(set(arch.communication_qubits))
+        
+        arch.core_comm_qubits = [[] for _ in range(arch.num_cores)]
+        for p in arch.communication_qubits:
+            arch.core_comm_qubits[arch.qubit_to_core[p]].append(p)
+            
+        arch.core_qubits = [[] for _ in range(arch.num_cores)]
+        for p in range(arch.num_qubits):
+            arch.core_qubits[arch.qubit_to_core[p]].append(p)
         
         return arch
     
