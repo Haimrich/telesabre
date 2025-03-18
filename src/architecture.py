@@ -223,7 +223,7 @@ class Architecture:
             Edge(7,8)
         ]
         
-        arch._update_qubit_to_edges
+        arch._update_qubit_to_edges()
         arch._build_teleport_edges()
         
         arch.communication_qubits = list(set(arch.communication_qubits))
@@ -238,5 +238,62 @@ class Architecture:
         
         return arch
     
+    @staticmethod
+    def C():
+        arch = Architecture(3,3,3,3)
+        
+        # 1  2  3  - 10 11 12 - 19 20 21
+        # 4  5  6    13 14 15   22 23 24
+        # 7  8  9  - 16 17 18 - 25 26 27
+        # |     |    |     |    |     |
+        # 28 29 30 - 37 38 39 - 46 47 48
+        # 31 32 33   40 41 42   49 50 51
+        # 34 35 36 - 43 44 45 - 52 53 54
+        # |     |    |     |    |     |
+        # 55 56 57 - 64 65 66 - 73 74 75
+        # 58 59 60   67 68 69   76 77 78
+        # 61 62 63 - 70 71 72 - 79 80 81
+        
+        arch.inter_core_edges = [
+            Edge(2,10),
+            Edge(8,15),
+            Edge(11,18),
+            Edge(17,24),
+            Edge(29,36),
+            Edge(35,42),
+            Edge(38,45),
+            Edge(44,51),
+            Edge(56,63),
+            Edge(62,69),
+            Edge(65,72),
+            Edge(71,78),
+            Edge(6,27),
+            Edge(8,29),
+            Edge(15,36),
+            Edge(17,38),
+            Edge(24,45),
+            Edge(26,47),
+            Edge(33,54),
+            Edge(35,56),
+            Edge(42,63),
+            Edge(44,65),
+            Edge(51,72),
+            Edge(53,74),
+        ]
+        
+        arch._update_qubit_to_edges()
+        arch._build_teleport_edges()
+        
+        arch.communication_qubits = list(set(arch.communication_qubits))
+        
+        arch.core_comm_qubits = [[] for _ in range(arch.num_cores)]
+        for p in arch.communication_qubits:
+            arch.core_comm_qubits[arch.qubit_to_core[p]].append(p)
+            
+        arch.core_qubits = [[] for _ in range(arch.num_cores)]
+        for p in range(arch.num_qubits):
+            arch.core_qubits[arch.qubit_to_core[p]].append(p)
+        
+        return arch
         
     

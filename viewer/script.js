@@ -93,9 +93,8 @@ function renderIteration(iteration) {
         const path = data.iterations[iteration].needed_paths[i];
         console.log(path);
         for (let j = 0; j < path.length - 1; j++) {
-            //const e = edge_to_id[[path[j], path[j+1]]];
-            //needed_edges[e].style.opacity = 1;
-            // TODO update for contracted graph
+            const e = edge_to_id[[path[j], path[j+1]]];
+            needed_edges[e].style.opacity = 1;
         }
     }
 

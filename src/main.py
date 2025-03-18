@@ -31,6 +31,8 @@ def main():
             architecture = Architecture.A()
         elif args.architecture == "b":
             architecture = Architecture.B()
+        elif args.architecture == "c":
+            architecture = Architecture.C()
         else:
             raise ValueError("Invalid architecture")
     else:
