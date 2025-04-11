@@ -46,7 +46,7 @@ def main():
     
     print("=== QLIMT ===")
     
-    swaps, tps, telegate, depth = sabre_mapping(circuit, architecture)
+    swaps, tps, telegate, depth = sabre_mapping(circuit, architecture, seed= args.seed)
     
     print("Swaps:", swaps)
     print("Teleports:", tps)

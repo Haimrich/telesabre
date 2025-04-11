@@ -6,6 +6,9 @@ class Layout:
         self.virt_to_phys = np.argsort(self.phys_to_virt)  # Compute inverse
         self.phys_to_core = np.array(phys_to_core, dtype=int) if phys_to_core is not None else np.zeros_like(mapping)
         self.num_virtual = num_virtual if num_virtual is not None else len(mapping)
+        
+        num_cores = np.max(self.phys_to_core) + 1
+        self.core_capacities = [np.sum((self.phys_to_core == core) & (self.phys_to_virt >= self.num_virtual)) for core in range(num_cores)]
 
     def swap(self, phys1, phys2):
         """Swap two physical positions and update the inverse mapping."""
@@ -17,6 +20,11 @@ class Layout:
         """Teleport a qubit from source to target"""
         assert (not self.is_phys_free(phys_source)) and self.is_phys_free(phys_mediator) and self.is_phys_free(phys_target)
         self.swap(phys_source, phys_target)
+        
+        core_source = self.phys_to_core[phys_source]
+        core_target = self.phys_to_core[phys_target]
+        self.core_capacities[core_source] += 1
+        self.core_capacities[core_target] -= 1
 
     def can_execute_gate(self, gate, graph):
         """Check if the physical positions of virt1 and virt2 are adjacent in a given graph."""
@@ -49,7 +57,7 @@ class Layout:
     
     def get_core_capacity(self, core):
         """Return the current number of free physical positions in a core."""
-        return np.sum((self.phys_to_core == core) & (self.phys_to_virt >= self.num_virtual))
+        return self.core_capacities[core]
     
     def __repr__(self):
         return f"Phys to Virt: {self.phys_to_virt}\nVirt to Phys: {self.virt_to_phys}"
