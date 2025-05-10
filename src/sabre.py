@@ -1,6 +1,6 @@
 from qiskit import QuantumCircuit
 from qiskit.transpiler import CouplingMap, PassManager
-from qiskit.transpiler.passes import SabreLayout, SabreSwap
+from qiskit.transpiler.passes import *
 
 def run_sabre(circuit, architecture, heuristic="lookahead", seed=0):
     # heuristic can be ["basic", "lookahead", "decay"]
@@ -18,8 +18,12 @@ def run_sabre(circuit, architecture, heuristic="lookahead", seed=0):
     edges += [[edge.p_mediator, edge.p_target] for edge in architecture.teleport_edges]
     device = CouplingMap(couplinglist=edges)
     
-    pass_manager = PassManager([SabreLayout(coupling_map=device, seed=seed), 
-                                SabreSwap(coupling_map=device, heuristic=heuristic, seed=seed)])
+    pass_manager = PassManager([#SabreLayout(coupling_map=device, seed=seed),
+                                TrivialLayout(coupling_map=device),
+                                FullAncillaAllocation(coupling_map=device),
+                                ApplyLayout(),
+                                ##EnlargeWithAncilla(), 
+                                SabreSwap(coupling_map=device, heuristic=heuristic, seed=seed, trials=1)])
     sabre_cir = pass_manager.run(qc)
     num_swaps = sum(1 for gate in sabre_cir.data if gate[0].name == 'swap')
     sabre_cir = sabre_cir.decompose(['swap'])

@@ -199,6 +199,13 @@ function renderIteration(iteration) {
         li.children[3].textContent = front_scores[i].toFixed(3);
         li.children[4].textContent = future_scores[i].toFixed(3);
     }
+
+    deadlock = document.getElementById('deadlock');
+    if (data.iterations[iteration].solving_deadlock) {
+        deadlock.style.opacity = 1;
+    } else {
+        deadlock.style.opacity = 0;
+    }
 }
 
 function setupScenes() {

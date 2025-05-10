@@ -3,15 +3,24 @@
 import argparse
 import os
 
+import numpy as np
+
 from circuit import Circuit
 from architecture import Architecture
+from config import Config
 
-from qlimt import sabre_mapping
+from sota import hungarian_assignement, count_non_valid_assignments, count_intercore_comms, fgp_oee_assignment
+from qlimt import run_telesabre
 from sabre import run_sabre
+
 
 
 def main():
     args = parse_args()
+    
+    print("=== Configuration ===")
+    config = Config()
+    print(config)
     
     qasm_filename = args.qasm
     if qasm_filename is not None:
@@ -33,6 +42,16 @@ def main():
             architecture = Architecture.B()
         elif args.architecture == "c":
             architecture = Architecture.C()
+        elif args.architecture == "d":
+            architecture = Architecture.D()
+        elif args.architecture == "e":
+            architecture = Architecture.E()
+        elif args.architecture == "f":
+            architecture = Architecture.F()
+        elif args.architecture == "g":
+            architecture = Architecture.G()
+        elif args.architecture == "h":
+            architecture = Architecture.H()
         else:
             raise ValueError("Invalid architecture")
     else:
@@ -46,12 +65,7 @@ def main():
     
     print("=== QLIMT ===")
     
-    swaps, tps, telegate, depth = sabre_mapping(circuit, architecture, seed= args.seed)
-    
-    print("Swaps:", swaps)
-    print("Teleports:", tps)
-    print("Teleport Gates:", telegate)
-    print("Depth:", depth)
+    swaps, tps, telegate, depth, tp_depth, deadlocks, initial_layout = run_telesabre(config, circuit, architecture, seed= args.seed)
     
     if architecture.num_cores == 1:
         print("=== SABRE ===")
@@ -60,6 +74,35 @@ def main():
         print("Depth:", depth)
     
     
+    slices = circuit.get_slices()
+    capacity = architecture.num_qubits // architecture.num_cores
+    core_distance_matrix = architecture.get_core_distance_matrix()
+    
+    print("=== Hungarian ===")
+    print(core_distance_matrix)
+    print(capacity)
+    
+    
+    assignments = hungarian_assignement(slices, architecture.num_qubits, architecture.num_cores, capacity, lookahead=True, distance_matrix=core_distance_matrix)
+    non_valid, exceed_cap, sep_friends = count_non_valid_assignments(slices, assignments, capacity=capacity)
+    hun_teleports, hun_depth = count_intercore_comms(assignments, core_distance_matrix)
+    print("  Teleports:", hun_teleports)
+    print("  Depth:", hun_depth)
+    print("  Non-valid assignments:", non_valid)
+    
+    print("=== Hungarian Same Initial Layout ===")
+    
+    initial_layout = np.array([architecture.get_qubit_core(initial_layout.virt_to_phys[v]) for v in range(architecture.num_qubits)])
+    assignments = hungarian_assignement(slices, architecture.num_qubits, architecture.num_cores, capacity, lookahead=True, distance_matrix=core_distance_matrix, initial=initial_layout)
+    non_valid, exceed_cap, sep_friends = count_non_valid_assignments(slices, assignments, capacity=capacity)
+    hun_teleports, hun_depth = count_intercore_comms(assignments, core_distance_matrix)
+    print("  Teleports:", hun_teleports)
+    print("  Depth:", hun_depth)
+    print("  Non-valid assignments:", non_valid, "Exceed cap:", exceed_cap, "Sep friends:", sep_friends)
+
+    
+    print("Slices", slices)
+    print("Timesteps:", len(slices))
     
 
 

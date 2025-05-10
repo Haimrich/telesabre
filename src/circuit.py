@@ -89,3 +89,26 @@ class Circuit:
             gate = Gate(qubits, instruction.operation.name)
             gates.append(gate)
         return Circuit(gates=gates, num_qubits=circuit.num_qubits)
+    
+    @staticmethod
+    def remove_node_and_connect_neighbors(G, node):
+        # Get parents and children of node A
+        parents = list(G.predecessors(node))
+        children = list(G.successors(node))
+        for parent in parents:
+            for child in children:
+                G.add_edge(parent, child)
+        G.remove_node(node)
+        return G
+
+    def get_slices(self):
+        nodes = list(self.dag.nodes)
+        twodag = self.dag.copy()
+        for node in nodes:
+            if not self.gates[node].is_two_qubit():
+                self.remove_node_and_connect_neighbors(twodag, node)
+                
+        slices = [[self.gates[node].target_qubits for node in layer] for layer in nx.topological_generations(twodag)]
+        
+        return slices
+    

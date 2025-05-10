@@ -370,3 +370,21 @@ input[type=range].slider.slider-progress::-ms-fill-lower {
   border: none;
   border-right-width: 0;
 }
+
+
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+#deadlock {
+  opacity: 1;
+  color: red;
+  font-size: 12px;
+  padding: 6px;
+  border-radius: 6cap;
+  border: 1.5px solid red;
+  transition: 0.1s all;
+}

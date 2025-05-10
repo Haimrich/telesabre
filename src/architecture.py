@@ -1,5 +1,4 @@
-
-
+import networkx as nx
 
 class Edge:
     # Physical qubits, undirected edge
@@ -18,6 +17,8 @@ class TeleportEdge:
 
 class Architecture:
     def __init__(self, grid_x=None, grid_y=None, core_x=None, core_y=None, double_tp=False):
+        self.name = "arch"
+        
         self.num_qubits = 0
         self.edges = []
         self.qubit_to_edges = []
@@ -187,6 +188,11 @@ class Architecture:
     def get_qubit_core(self, qubit):
         return self.qubit_to_core[qubit]
     
+    def get_core_distance_matrix(self):
+        core_graph = nx.Graph()
+        core_graph.add_edges_from([(self.get_qubit_core(edge.p1), self.get_qubit_core(edge.p2)) for edge in self.inter_core_edges])
+        return nx.floyd_warshall_numpy(core_graph, nodelist=range(self.num_cores), weight=None)
+    
             
     @staticmethod
     def A():
@@ -212,6 +218,7 @@ class Architecture:
         for p in range(arch.num_qubits):
             arch.core_qubits[arch.qubit_to_core[p]].append(p)
         
+        arch.name = "2x2C 3x3Q"
         return arch
     
     @staticmethod
@@ -236,6 +243,7 @@ class Architecture:
         for p in range(arch.num_qubits):
             arch.core_qubits[arch.qubit_to_core[p]].append(p)
         
+        arch.name = "2x2C 3x1Q"
         return arch
     
     @staticmethod
@@ -294,6 +302,203 @@ class Architecture:
         for p in range(arch.num_qubits):
             arch.core_qubits[arch.qubit_to_core[p]].append(p)
         
+        arch.name = "3x3C 3x3Q"
+        return arch
+    
+    
+    @staticmethod
+    def D():
+        arch = Architecture(2,2,2,2)
+        
+        #   1   2  -  5   6
+        #   3   4     7   8
+        #   |             |
+        #   9  10     13 14
+        #   11 12  -  15 16
+        
+        
+        arch.inter_core_edges = [
+            Edge(1,4),
+            Edge(2,8),
+            Edge(7,13),
+            Edge(11,14)
+        ]
+        
+        arch._update_qubit_to_edges()
+        arch._build_teleport_edges()
+        
+        arch.communication_qubits = list(set(arch.communication_qubits))
+        
+        arch.core_comm_qubits = [[] for _ in range(arch.num_cores)]
+        for p in arch.communication_qubits:
+            arch.core_comm_qubits[arch.qubit_to_core[p]].append(p)
+            
+        arch.core_qubits = [[] for _ in range(arch.num_cores)]
+        for p in range(arch.num_qubits):
+            arch.core_qubits[arch.qubit_to_core[p]].append(p)
+        
+        arch.name = "2x2C 2x2Q"
+        return arch
+    
+    
+    def E():
+        arch = Architecture(4,4,2,2)
+        
+        #   0  1  2  3    16  17  18  19
+        #   4  5  6  7 -  20  21  22  23
+        #   8  9 10 11    24  25  26  27
+        #  12 13 14 15    28  29  30  31
+        #     |                    |
+        #  32 33 34 35     48  49  50  51
+        #  36 37 38 39     52  53  54  55
+        #  40 41 42 43  -  56  57  58  59
+        #  44 45 46 47     60  61  62  63
+        
+        
+        arch.inter_core_edges = [
+            Edge(13,33),
+            Edge(7,20),
+            Edge(30,50),
+            Edge(43,56)
+        ]
+        
+        arch._update_qubit_to_edges()
+        arch._build_teleport_edges()
+        
+        arch.communication_qubits = list(set(arch.communication_qubits))
+        
+        arch.core_comm_qubits = [[] for _ in range(arch.num_cores)]
+        for p in arch.communication_qubits:
+            arch.core_comm_qubits[arch.qubit_to_core[p]].append(p)
+            
+        arch.core_qubits = [[] for _ in range(arch.num_cores)]
+        for p in range(arch.num_qubits):
+            arch.core_qubits[arch.qubit_to_core[p]].append(p)
+        
+        arch.name = "2x2C 4x4Q - E"
         return arch
         
     
+
+    def F():
+        arch = Architecture(4,4,2,2)
+        
+        #   0  1  2  3  -  16  17  18  19
+        #   4  5  6  7     20  21  22  23
+        #   8  9 10 11  -  24  25  26  27
+        #  12 13 14 15     28  29  30  31
+        #  |      |             |       |
+        #  32 33 34 35     48  49  50  51
+        #  36 37 38 39  -  52  53  54  55
+        #  40 41 42 43     56  57  58  59
+        #  44 45 46 47  -  60  61  62  63
+        
+        
+        arch.inter_core_edges = [
+            Edge(3,16),
+            Edge(11,24),
+            Edge(12,32),
+            Edge(14,34),
+            Edge(29,49),
+            Edge(31,51),
+            Edge(39,52),
+            Edge(47,60)
+        ]
+        
+        arch._update_qubit_to_edges()
+        arch._build_teleport_edges()
+        
+        arch.communication_qubits = list(set(arch.communication_qubits))
+        
+        arch.core_comm_qubits = [[] for _ in range(arch.num_cores)]
+        for p in arch.communication_qubits:
+            arch.core_comm_qubits[arch.qubit_to_core[p]].append(p)
+            
+        arch.core_qubits = [[] for _ in range(arch.num_cores)]
+        for p in range(arch.num_qubits):
+            arch.core_qubits[arch.qubit_to_core[p]].append(p)
+        
+        arch.name = "2x2C 4x4Q - F"
+        return arch
+    
+    
+    
+    def G():
+        arch = Architecture(4,4,2,2)
+        
+        #   0  1  2  3  -  16  17  18  19
+        #   4  5  6  7     20  21  22  23
+        #   8  9 10 11     24  25  26  27
+        #  12 13 14 15     28  29  30  31
+        #  |            X              |
+        #  32 33 34 35     48  49  50  51
+        #  36 37 38 39     52  53  54  55
+        #  40 41 42 43     56  57  58  59
+        #  44 45 46 47  -  60  61  62  63
+        
+        
+        arch.inter_core_edges = [
+            Edge(3,16),
+            Edge(12,32),
+            Edge(31,51),
+            Edge(47,60),
+            Edge(15,48),
+            Edge(28,35)
+        ]
+        
+        arch._update_qubit_to_edges()
+        arch._build_teleport_edges()
+        
+        arch.communication_qubits = list(set(arch.communication_qubits))
+        
+        arch.core_comm_qubits = [[] for _ in range(arch.num_cores)]
+        for p in arch.communication_qubits:
+            arch.core_comm_qubits[arch.qubit_to_core[p]].append(p)
+            
+        arch.core_qubits = [[] for _ in range(arch.num_cores)]
+        for p in range(arch.num_qubits):
+            arch.core_qubits[arch.qubit_to_core[p]].append(p)
+        
+        arch.name = "2x2C 4x4Q - G"
+        return arch
+    
+    def H():
+        arch = Architecture(4,4,3,2)
+        
+        #   0  1  2  3     16  17  18  19     32  33  34  35
+        #   4  5  6  7  -  20  21  22  23  -  36  37  38  39
+        #   8  9 10 11     24  25  26  27     40  41  42  43
+        #  12 13 14 15     28  29  30  31     44  45  46  47
+        #      |                 /                    |
+        #  48 49 50 51     64  65  66  67     80  81  82  83  
+        #  52 53 54 55     68  69  70  71     84  85  86  87
+        #  56 57 58 59  -  72  73  74  75  -  88  89  90  91
+        #  60 61 62 63     76  77  78  79     92  93  94  95
+        
+        
+        arch.inter_core_edges = [
+            Edge(13,49),
+            Edge(7,20),
+            Edge(23,36),
+            Edge(59,72),
+            Edge(30,65),
+            Edge(75,88),
+            Edge(46,82)
+        ]
+        
+        arch._update_qubit_to_edges()
+        arch._build_teleport_edges()
+        
+        arch.communication_qubits = list(set(arch.communication_qubits))
+        
+        arch.core_comm_qubits = [[] for _ in range(arch.num_cores)]
+        for p in arch.communication_qubits:
+            arch.core_comm_qubits[arch.qubit_to_core[p]].append(p)
+            
+        arch.core_qubits = [[] for _ in range(arch.num_cores)]
+        for p in range(arch.num_qubits):
+            arch.core_qubits[arch.qubit_to_core[p]].append(p)
+        
+        arch.name = "3x2C 4x4Q - H"
+        return arch
+        
