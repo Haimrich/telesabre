@@ -724,6 +724,14 @@ graph_t* telesabre_build_contracted_graph_for_pair(
                 if (pc2 == start_qubit || pc2 == end_qubit) {
                     distance += 1;
                 }
+                distance *= 2;
+                
+                // Nearest Free Penalty
+                float nearest_free_distance_1 = heap_get_min(layout->nearest_free_qubits[device->comm_qubit_node_id[pc1]]).priority;
+                distance += nearest_free_distance_1;
+                float nearest_free_distance_2 = heap_get_min(layout->nearest_free_qubits[device->comm_qubit_node_id[pc2]]).priority;
+                distance += nearest_free_distance_2;
+
                 graph_add_edge(graph, src_node, dst_node, distance);
             }
         }
@@ -736,12 +744,29 @@ graph_t* telesabre_build_contracted_graph_for_pair(
         int src_node = device->comm_qubit_node_id[pc1];
         int dst_node = device->comm_qubit_node_id[pc2];
         int distance = 2;
+        // Penalty for start and end qubit in comm qubit
         if (pc1 == start_qubit || pc1 == end_qubit) {
             distance += 1;
         }
         if (pc2 == start_qubit || pc2 == end_qubit) {
             distance += 1;
         }
+        distance *= 2;
+        // Full Core Penalty
+        core_t core1 = device->phys_to_core[pc1];
+        if (layout_get_core_remaining_capacity(layout, core1) <= 1) {
+            distance += ts->config->full_core_penalty;
+        }
+        core_t core2 = device->phys_to_core[pc2];
+        if (layout_get_core_remaining_capacity(layout, core2) <= 1) {
+            distance += ts->config->full_core_penalty;
+        }
+        // Nearest Free Penalty
+        float nearest_free_distance_1 = heap_get_min(layout->nearest_free_qubits[device->comm_qubit_node_id[pc1]]).priority;
+        distance += nearest_free_distance_1;
+        float nearest_free_distance_2 = heap_get_min(layout->nearest_free_qubits[device->comm_qubit_node_id[pc2]]).priority;
+        distance += nearest_free_distance_2;
+
         graph_add_edge(graph, src_node, dst_node, distance);
     }
 
@@ -749,11 +774,17 @@ graph_t* telesabre_build_contracted_graph_for_pair(
     core_t start_core = device->phys_to_core[start_qubit];
     for (int j = 0; j < device->core_num_comm_qubits[start_core]; j++) {
         pqubit_t pc = device->core_comm_qubits[start_core][j];
-        int dist = device_get_distance(ts->device, start_qubit, pc) - 1;
+        int distance = device_get_distance(ts->device, start_qubit, pc) - 1;
+        distance *= 2;
+
+        // Nearest Free Penalty
+        float nearest_free_distance = heap_get_min(layout->nearest_free_qubits[device->comm_qubit_node_id[pc]]).priority;
+        distance += nearest_free_distance;
+
         int src_node = node_ids_out[0];
         int dst_node = device->comm_qubit_node_id[pc];
         if (src_node != dst_node) {
-            graph_add_directed_edge(graph, src_node, dst_node, dist);
+            graph_add_directed_edge(graph, src_node, dst_node, distance);
         }
     }
 
