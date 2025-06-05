@@ -23,7 +23,7 @@ config_t* new_config() {
     config->safety_valve_iters = 300;
 
     config->extended_set_size = 20;
-    config->extended_set_factor = 0.005f;
+    config->extended_set_factor = 0.05f;
 
     config->full_core_penalty = 10;
     config->save_data = false;

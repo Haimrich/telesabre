@@ -84,6 +84,7 @@ typedef struct {
     size_t num_nearest_free_qubits;
     size_t nearest_free_qubits_capacity;
 
+    result_t last_progress_result;
     result_t result;
 } telesabre_t;
 
@@ -124,15 +125,4 @@ void telesabre_step_free(telesabre_t* ts);
 
 void telesabre_free(telesabre_t* ts);
 
-
 result_t run_telesabre(device_t* device, circuit_t* circuit, config_t* config_t);
-
-
-float evaluate_op_energy(
-    const config_t* config,
-    const layout_t* layout, 
-    const device_t* device, 
-    const circuit_t* circuit, 
-    const float* usage_penalties,
-    const op_t* op 
-);

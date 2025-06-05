@@ -234,26 +234,28 @@ int device_get_distance(const device_t* device, pqubit_t p1, pqubit_t p2) {
 
 
 void device_print(const device_t* dev) {
-    printf("Device: %s\n", dev->name);
-    printf("Number of qubits: %d\n", dev->num_qubits);
-    printf("Number of cores: %d\n", dev->num_cores);
-    printf("Core capacity: %d\n", dev->core_capacity);
-    printf("Number of edges: %d\n", dev->num_edges);
-    printf("Number of teleport edges: %d\n", dev->num_tp_edges);
-    printf("Number of inter-core edges: %d\n", dev->num_intercore_edges);
+    printf(BHBLU"\nDevice \"%s\":\n"CRESET, dev->name);
+    printf(HBLU"  Number of qubits:"CRESET" %d\n", dev->num_qubits);
+    printf(HBLU"  Number of cores:"CRESET" %d\n", dev->num_cores);
+    printf(HBLU"  Core capacity:"CRESET" %d\n", dev->core_capacity);
+    printf(HBLU"  Number of edges:"CRESET" %d\n", dev->num_edges);
+    printf(HBLU"  Number of teleport edges:"CRESET" %d\n", dev->num_tp_edges);
+    printf(HBLU"  Number of inter-core edges:"CRESET" %d\n", dev->num_intercore_edges);
 
     for (int i = 0; i < dev->num_cores; i++) {
-        printf("Core %d has %d qubits:\n", i, dev->core_num_comm_qubits[i]);
+        printf("  Core %d has %d qubits:\n", i, dev->core_num_comm_qubits[i]);
         for (int j = 0; j < dev->core_num_comm_qubits[i]; j++) {
             printf("  Comm qubit %d: %d\n", j, dev->core_comm_qubits[i][j]);
         }
     }
 
     // Intercore edges
-    printf("Inter-core edges:\n");
+    printf(HBLU"  Inter-core edges:"CRESET);
     for (int i = 0; i < dev->num_intercore_edges; i++) {
-        printf("  Edge %d: (%d, %d)\n", i, dev->inter_core_edges[i].p1, dev->inter_core_edges[i].p2);
+        if (i % 8 == 0) printf("\n    ");
+        printf(BLU"("CRESET"%*d"BLU","CRESET"%*d"BLU")  "CRESET, 3, dev->inter_core_edges[i].p1, 3, dev->inter_core_edges[i].p2);
     }
+    printf("\n");
 }
 
 
