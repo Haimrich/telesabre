@@ -154,6 +154,17 @@ void graph_free(graph_t* graph) {
 }
 
 
+path_t* path_copy(const path_t* src) {
+    if (!src) return NULL;
+    path_t* copy = malloc(sizeof(path_t));
+    copy->length = src->length;
+    copy->distance = src->distance;
+    copy->nodes = malloc(sizeof(int) * src->length);
+    memcpy(copy->nodes, src->nodes, sizeof(int) * src->length);
+    return copy;
+}
+
+
 void path_free(path_t* path) {
     if (!path) return;
     free(path->nodes);

@@ -3,11 +3,13 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-#include "circuit.h"
 #include "config.h"
 #include "device.h"
+#include "circuit.h"
 #include "layout.h"
 #include "graph.h"
+#include "op.h"
+#include "report.h"
 
 
 typedef struct result {
@@ -17,30 +19,6 @@ typedef struct result {
     int depth;
     int num_deadlocks;
 } result_t;
-
-typedef enum op_type {
-    OP_SWAP,
-    OP_TELEPORT,
-    OP_TELEGATE,
-    OP_NONE
-} op_type_t;
-
-typedef enum op_target {
-    OP_SOURCE      = 0,
-    OP_TARGET_A    = 0,
-    OP_MEDIATOR    = 1,
-    OP_MEDIATOR_A  = 1,
-    OP_MEDIATOR_B  = 2,
-    OP_TARGET      = 3,
-    OP_TARGET_B    = 3,
-} op_target_t;
-
-typedef struct op {
-    op_type_t type;
-    pqubit_t qubits[4];
-    int front_gate_idx;
-    unsigned char reasons;
-} op_t;
 
 typedef struct {
     device_t* device;
@@ -63,6 +41,9 @@ typedef struct {
     size_t num_remaining_slices;
     bool slices_outdated;
 
+    int *applied_gates;
+    int num_applied_gates;
+
     op_t* candidate_ops;
     float* candidate_ops_energies;
     int num_candidate_ops;
@@ -84,8 +65,12 @@ typedef struct {
     size_t num_nearest_free_qubits;
     size_t nearest_free_qubits_capacity;
 
+    op_t applied_op;
+
     result_t last_progress_result;
     result_t result;
+
+    report_t* report;
 } telesabre_t;
 
 result_t telesabre_run(config_t* config, device_t* device, circuit_t* circuit);
@@ -93,6 +78,7 @@ result_t telesabre_run(config_t* config, device_t* device, circuit_t* circuit);
 telesabre_t* telesabre_init(config_t* config, device_t* device, circuit_t* circuit);
 
 void telesabre_step(telesabre_t* ts);
+
 void telesabre_safety_valve_check(telesabre_t* ts);
 void telesabre_execute_front_gate(telesabre_t* ts, size_t front_gate_idx);
 void telesabre_made_progress(telesabre_t* ts);
@@ -120,6 +106,8 @@ graph_t* telesabre_build_contracted_graph_for_pair(
     size_t node_ids_out[2],
     pqubit_t* node_id_to_phys_out
 );
+
+void telesabre_add_report_entry(const telesabre_t* ts);
 
 void telesabre_step_free(telesabre_t* ts);
 

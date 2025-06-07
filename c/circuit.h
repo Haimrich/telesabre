@@ -23,13 +23,12 @@ typedef struct gate
 } gate_t;
 
 
-typedef struct
+typedef struct circuit
 {
     size_t num_qubits;
 
     gate_t *gates;
     size_t num_gates;
-
 } circuit_t;
 
 
@@ -49,17 +48,17 @@ bool gate_is_two_qubit(gate_t *gate);
 bool gates_share_qubits(gate_t *gate1, gate_t *gate2);
 
 
-circuit_t* parse_qasm_file(const char* filename);
+circuit_t* parse_qasm_file(const char *filename);
 
-void circuit_build_dependencies(circuit_t* circuit);
+void circuit_build_dependencies(circuit_t *circuit);
 
-void circuit_print(circuit_t* circuit);
+void circuit_print(circuit_t *circuit);
 
-void free_circuit(circuit_t* circuit);
+void free_circuit(circuit_t *circuit);
 
 
-sliced_circuit_view_t* circuit_get_sliced_view(circuit_t* circuit, bool two_qubit_only);
+sliced_circuit_view_t* circuit_get_sliced_view(circuit_t *circuit, bool two_qubit_only);
 
-void sliced_circuit_view_print(sliced_circuit_view_t* view);
+void sliced_circuit_view_print(sliced_circuit_view_t *view);
 
-void free_sliced_circuit_view(sliced_circuit_view_t* view);
+void free_sliced_circuit_view(sliced_circuit_view_t *view);

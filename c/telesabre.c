@@ -1,6 +1,7 @@
 #include "telesabre.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -10,6 +11,7 @@
 #include "config.h"
 #include "device.h"
 #include "layout.h"
+#include "report.h"
 #include "utils.h"
 #include "graph.h"
 
@@ -61,6 +63,10 @@ telesabre_t* telesabre_init(config_t* config, device_t* device, circuit_t* circu
     ts->remaining_slices_ptr = malloc(sizeof(size_t) * (circuit->num_gates + 1));
     ts->num_remaining_slices = 0;
 
+    // Applied gates
+    ts->applied_gates = malloc(sizeof(int) * circuit->num_gates);
+    ts->num_applied_gates = 0;
+
     // Attraction paths
     ts->attraction_paths = NULL;
     ts->num_attraction_paths = 0;
@@ -77,6 +83,8 @@ telesabre_t* telesabre_init(config_t* config, device_t* device, circuit_t* circu
     ts->nearest_free_qubits_capacity = 0;
 
     ts->result = (result_t){0};
+
+    ts->report = report_new();
 
     return ts;
 }
@@ -97,7 +105,7 @@ void telesabre_execute_front_gate(telesabre_t* ts, size_t front_gate_idx) {
     const gate_t* gate = &ts->circuit->gates[ts->front[front_gate_idx]];
 
     // Debug Print
-    printf(H3COL"    Executing gate "CRESET"%03zu = %s(", ts->front[front_gate_idx], gate->type);
+    printf(H3COL"  Executing gate "CRESET"%03zu = %s(", ts->front[front_gate_idx], gate->type);
     for (int j = 0; j < gate->num_target_qubits; j++) {
         printf("%d", gate->target_qubits[j]);
         if (j < gate->num_target_qubits - 1) printf(", ");
@@ -346,9 +354,9 @@ float telesabre_evaluate_op_energy(telesabre_t* ts, const op_t* op) {
     }
 
     float usage_penalty = ts->usage_penalties[op->qubits[0]];
-    int num_qubits = op->type == OP_TELEGATE ? 4 : (op->type == OP_TELEPORT ? 3 : 2);
-    for (int i = 0; i < num_qubits; i++) {
-        usage_penalty = ts->usage_penalties[op->qubits[i]] > usage_penalty ? ts->usage_penalties[op->qubits[i]] : usage_penalty;
+    for (int i = 0; i < op_get_num_qubits(op); i++) {
+        float new_penalty = ts->usage_penalties[op->qubits[i]];
+        usage_penalty = new_penalty > usage_penalty ? new_penalty : usage_penalty;
     }
 
     float front_energy = 0.0f;
@@ -401,10 +409,14 @@ float telesabre_evaluate_op_energy(telesabre_t* ts, const op_t* op) {
                 break; 
             }
         }
+
         if (ts->safety_valve_activated) break;
     }
 
-    float energy = front_energy / ts->front_size;
+    float energy = front_energy;
+    if (!ts->safety_valve_activated) {
+        energy /= ts->front_size;
+    }
     if (extended_set_size > 0) {
         energy += ts->config->extended_set_factor * extended_energy / extended_set_size;
     }
@@ -680,6 +692,12 @@ graph_t* telesabre_build_contracted_graph_for_pair(
                 float nearest_free_distance_2 = heap_get_min(layout->nearest_free_qubits[pc2_node]).priority;
                 distance += nearest_free_distance_2;
 
+                // Full core penalty
+                core_t core = device->phys_to_core[pc1];
+                if (layout_get_core_remaining_capacity(layout, core) <= 2) {
+                    distance += ts->config->full_core_penalty;
+                }
+
                 graph_add_edge(graph, pc1_node, pc2_node, distance);
             }
         }
@@ -704,11 +722,11 @@ graph_t* telesabre_build_contracted_graph_for_pair(
         
         // Full Core Penalty
         core_t core1 = device->phys_to_core[pc1];
-        if (layout_get_core_remaining_capacity(layout, core1) <= 1) {
+        if (layout_get_core_remaining_capacity(layout, core1) <= 2) {
             distance += ts->config->full_core_penalty;
         }
         core_t core2 = device->phys_to_core[pc2];
-        if (layout_get_core_remaining_capacity(layout, core2) <= 1) {
+        if (layout_get_core_remaining_capacity(layout, core2) <= 2) {
             distance += ts->config->full_core_penalty;
         }
         // Nearest Free Penalty
@@ -735,6 +753,12 @@ graph_t* telesabre_build_contracted_graph_for_pair(
         float nearest_free_distance = heap_get_min(layout->nearest_free_qubits[pc_node]).priority;
         distance += nearest_free_distance;
 
+        // Full core penalty
+        core_t core = device->phys_to_core[pc];
+        if (layout_get_core_remaining_capacity(layout, core) <= 2) {
+            distance += ts->config->full_core_penalty;
+        }
+
         if (start_qubit_node != pc_node) {
             graph_add_directed_edge(graph, start_qubit_node, pc_node, distance);
         }
@@ -754,6 +778,12 @@ graph_t* telesabre_build_contracted_graph_for_pair(
         // Nearest Free Penalty
         float nearest_free_distance = heap_get_min(layout->nearest_free_qubits[pc_node]).priority;
         distance += nearest_free_distance;
+
+        // Full core penalty
+        core_t core = device->phys_to_core[pc];
+        if (layout_get_core_remaining_capacity(layout, core) <= 2) {
+            distance += ts->config->full_core_penalty;
+        }
         
         if (pc_node != end_qubit_node) {
             graph_add_directed_edge(graph, pc_node, end_qubit_node, distance);
@@ -780,6 +810,7 @@ void telesabre_step_free(telesabre_t* ts) {
     // Free attraction paths
     for (int i = 0; i < ts->num_attraction_paths; i++) {
         path_free(ts->attraction_paths[i]);
+        ts->attraction_paths[i] = NULL;
     }
 }
 
@@ -808,6 +839,7 @@ void telesabre_step(telesabre_t* ts) {
 
     // Run front gates that can be run according to current layout
     bool found_executable_gate;
+    ts->num_applied_gates = 0;
     do {
         found_executable_gate = false;
         // Search for runnable gates in front
@@ -817,6 +849,7 @@ void telesabre_step(telesabre_t* ts) {
                 telesabre_execute_front_gate(ts, i);
                 telesabre_made_progress(ts);
                 found_executable_gate = true;
+                ts->applied_gates[ts->num_applied_gates++] = ts->front[i];
                 break;
             }
         }
@@ -873,29 +906,10 @@ void telesabre_step(telesabre_t* ts) {
     printf(H2COL"  Candidate Operations:\n"CRESET);
     for (int i = 0; i < ts->num_candidate_ops; i++) {
         const op_t* op = &ts->candidate_ops[i];
-        printf("    (%*d): Type: ", 3, i);
-        int op_qubits = 2;
-        switch (op->type) {
-            case OP_TELEGATE:
-                printf("TELEGATE");
-                op_qubits = 4;
-                break;
-            case OP_TELEPORT:
-                printf("TELEPORT");
-                op_qubits = 3;
-                break;
-            case OP_SWAP:
-                printf("SWAP");
-                op_qubits = 2;
-                break;
-            default:
-                printf("UNKNOWN");
-        }
-        printf(", Qubits: ");
+        int op_qubits = op_get_num_qubits(op);
+        printf("    (%*d): Type: %s, Qubits: ", 3, i, op_get_type_str(op));
         for (int j = 0; j < op_qubits; j++) {
-            if (op->qubits[j] != 0) {
-                printf("%*d", 4, op->qubits[j]);
-            }
+            printf("%*d", 4, op->qubits[j]);
         }
         printf(", Front Gate Index: %d, Energy: %.3f, Flags: %s\n", op->front_gate_idx, ts->candidate_ops_energies[i], byte_to_binary(op->reasons));
         
@@ -918,9 +932,13 @@ void telesabre_step(telesabre_t* ts) {
     if (num_best_operations > 0) {
         int best_op_idx = rand() % num_best_operations;
         const op_t best_op = ts->candidate_ops[best_op_idx];
+        ts->applied_op = best_op;
+        telesabre_add_report_entry(ts);
         telesabre_apply_candidate_op(ts, &best_op);
     } else {
         printf("    None\n");
+        ts->applied_op = (op_t){0};
+        telesabre_add_report_entry(ts);
     }
 
     telesabre_reset_usage_penalties(ts);
@@ -951,6 +969,11 @@ result_t telesabre_run(config_t* config, device_t* device, circuit_t* circuit) {
         ts->result.num_deadlocks);
 
     result_t result = ts->result;
+
+    if (config->save_report) {
+        report_save_as_json(ts->report, config->report_filename);
+    }
+
     telesabre_free(ts);
 
     return result;
@@ -959,6 +982,7 @@ result_t telesabre_run(config_t* config, device_t* device, circuit_t* circuit) {
 
 void telesabre_free(telesabre_t* ts) {
     if (!ts) return;
+
     free(ts->gate_num_remaining_parents);
     free(ts->front);
     layout_free(ts->layout);
@@ -968,15 +992,91 @@ void telesabre_free(telesabre_t* ts) {
     free(ts->candidate_ops_energies);
     free(ts->remaining_slices);
     free(ts->remaining_slices_ptr);
-    for (int i = 0; i < ts->num_attraction_paths; i++) {
-        path_free(ts->attraction_paths[i]);
-    }
+
+    free(ts->applied_gates);
+
+    for (int i = 0; i < ts->num_attraction_paths; i++)
+        if (ts->attraction_paths[i]) 
+            path_free(ts->attraction_paths[i]);
+    
     free(ts->attraction_paths);
     free(ts->traversed_comm_qubits);
     free(ts->nearest_free_qubits);
+
+    report_free(ts->report);
+
     free(ts);
 
     // TODO check
 }
 
 
+void telesabre_add_report_entry(const telesabre_t *ts) {
+    if (!ts->config->save_report) return;
+    report_ensure_capacity(ts->report);
+
+    report_entry_t entry;
+    entry.it = ts->it;
+
+    entry.num_teledata = ts->result.num_teledata;
+    entry.num_telegate = ts->result.num_telegate;
+    entry.num_swaps = ts->result.num_swaps;
+    
+    entry.safety_valve_activated = ts->safety_valve_activated;
+    
+    entry.phys_to_virt = malloc(sizeof(int) * ts->device->num_qubits);
+    memcpy(entry.phys_to_virt, ts->layout->phys_to_virt, sizeof(int) * ts->device->num_qubits);
+    
+    entry.virt_to_phys = malloc(sizeof(int) * ts->device->num_qubits);
+    memcpy(entry.virt_to_phys, ts->layout->virt_to_phys, sizeof(int) * ts->device->num_qubits);
+
+    entry.remaining_gates = malloc(sizeof(int) * ts->circuit->num_gates);
+    size_t num_remaining_gates = 0;
+    for (int i = 0; i < ts->circuit->num_gates; i++) {
+        if (ts->gate_num_remaining_parents[i] != (size_t)-1) {
+            entry.remaining_gates[num_remaining_gates++] = i;
+        }
+    }
+    entry.num_remaining_gates = num_remaining_gates;
+
+    entry.front = malloc(sizeof(int) * ts->front_size);
+    memcpy(entry.front, ts->front, sizeof(int) * ts->front_size);
+    entry.front_size = ts->front_size;
+
+    entry.applied_gates = malloc(sizeof(int) * ts->num_applied_gates);
+    memcpy(entry.applied_gates, ts->applied_gates, sizeof(int) * ts->num_applied_gates);
+    entry.num_applied_gates = ts->num_applied_gates;
+
+    entry.applied_gates_phys = malloc(sizeof(int[GATE_MAX_TARGET_QUBITS]) * ts->num_applied_gates);
+    for (int i = 0; i < ts->num_applied_gates; i++) {
+        const gate_t* gate = &ts->circuit->gates[ts->applied_gates[i]];
+        memset(entry.applied_gates_phys[i], -1, sizeof(int[GATE_MAX_TARGET_QUBITS]));
+        for (int j = 0; j < gate->num_target_qubits; j++) {
+            entry.applied_gates_phys[i][j] = layout_get_phys(ts->layout, gate->target_qubits[j]);
+        }
+    }
+
+    entry.candidate_ops = malloc(sizeof(op_t) * ts->num_candidate_ops);
+    memcpy(entry.candidate_ops, ts->candidate_ops, sizeof(op_t) * ts->num_candidate_ops);
+    entry.candidate_ops_energies = malloc(sizeof(float) * ts->num_candidate_ops);
+    memcpy(entry.candidate_ops_energies, ts->candidate_ops_energies, sizeof(float) * ts->num_candidate_ops);
+    // TODO
+    entry.candidate_ops_front_energies = malloc(sizeof(float) * ts->num_candidate_ops);
+    memset(entry.candidate_ops_front_energies, 0, sizeof(float) * ts->num_candidate_ops);
+    entry.candidate_ops_future_energies = malloc(sizeof(float) * ts->num_candidate_ops);
+    memset(entry.candidate_ops_future_energies, 0, sizeof(float) * ts->num_candidate_ops);
+    entry.num_candidate_ops = ts->num_candidate_ops;
+
+    entry.attraction_paths = malloc(sizeof(path_t*) * ts->num_attraction_paths);
+    for (int i = 0; i < ts->num_attraction_paths; i++) {
+        entry.attraction_paths[i] = path_copy(ts->attraction_paths[i]);
+    }
+    entry.num_attraction_paths = ts->num_attraction_paths;
+
+    entry.applied_op = ts->applied_op;
+
+    // TODO
+    entry.energy = 0.0f;
+
+    ts->report->entries[ts->report->num_entries++] = entry;
+}

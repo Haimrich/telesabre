@@ -47,6 +47,10 @@ typedef struct config {
     int init_layout_hun_min_free_qubit;
 
     int max_iterations;
+
+    bool save_report;
+
+    char report_filename[256];
 } config_t;
 
 

@@ -37,6 +37,12 @@ config_t* new_config() {
     config->init_layout_hun_min_free_qubit = 3;
 
     config->max_iterations = 1000000;
+    config->max_iterations = 100; //1000000;
+
+    config->save_report = true;
+
+    strcpy(config->report_filename, "report.json");
+
     return config;
 }
 
