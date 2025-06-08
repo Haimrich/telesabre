@@ -18,6 +18,7 @@ typedef struct result {
     int num_swaps;
     int depth;
     int num_deadlocks;
+    bool success;
 } result_t;
 
 typedef struct {
@@ -54,6 +55,7 @@ typedef struct {
     bool safety_valve_activated;
 
     path_t** attraction_paths;
+    int *attraction_paths_front_idx;
     size_t num_attraction_paths;
     size_t attraction_paths_capacity;
 

@@ -67,6 +67,7 @@ telesabre_t* telesabre_init(config_t* config, device_t* device, circuit_t* circu
 
     // Attraction paths
     ts->attraction_paths = NULL;
+    ts->attraction_paths_front_idx = NULL;
     ts->num_attraction_paths = 0;
     ts->attraction_paths_capacity = 0;
 
@@ -80,7 +81,14 @@ telesabre_t* telesabre_init(config_t* config, device_t* device, circuit_t* circu
     ts->num_nearest_free_qubits = 0;
     ts->nearest_free_qubits_capacity = 0;
 
-    ts->result = (result_t){0};
+    ts->result = (result_t){
+        .depth = 0,
+        .num_teledata = 0,
+        .num_telegate = 0,
+        .num_swaps = 0,
+        .num_deadlocks = 0,
+        .success = false
+    };
 
     ts->report = report_new();
 
@@ -162,6 +170,7 @@ void telesabre_calculate_attraction_paths(telesabre_t *ts) {
     if (ts->front_size > ts->attraction_paths_capacity) {
         ts->attraction_paths_capacity = ts->front_size;
         ts->attraction_paths = realloc(ts->attraction_paths, sizeof(path_t*) * ts->attraction_paths_capacity);
+        ts->attraction_paths_front_idx = realloc(ts->attraction_paths_front_idx, sizeof(int) * ts->attraction_paths_capacity);
     }
 
     for (int i = 0; i < ts->front_size; i++) {
@@ -196,7 +205,9 @@ void telesabre_calculate_attraction_paths(telesabre_t *ts) {
                 shortest_path->nodes[j] = node_id_to_phys[internal_id];
             }
         }
-        ts->attraction_paths[ts->num_attraction_paths++] = shortest_path;
+        ts->attraction_paths_front_idx[ts->num_attraction_paths] = i;
+        ts->attraction_paths[ts->num_attraction_paths] = shortest_path;
+        ts->num_attraction_paths++;
 
         graph_free(contracted_graph);
     }
@@ -483,7 +494,7 @@ void telesabre_collect_candidate_tele_ops(telesabre_t *ts) {
                 device_has_edge(device, g1, m1) && device_has_edge(device, m2, g2)) {
 
                 // Add telegate operation
-                op_t telegate_op = {.type = OP_TELEGATE, .qubits = {g1, m1, m2, g2}, .front_gate_idx = i};
+                op_t telegate_op = {.type = OP_TELEGATE, .qubits = {g1, m1, m2, g2}, .front_gate_idx = ts->attraction_paths_front_idx[i]};
                 telesabre_add_candidate_op(ts, &telegate_op);
             }
         }
@@ -505,7 +516,7 @@ void telesabre_collect_candidate_tele_ops(telesabre_t *ts) {
                 layout_get_core_remaining_capacity(layout, fwd_target_core) >= 2) {
                 
                 // Add teleport operation
-                op_t teleport_op = {.type = OP_TELEPORT, .qubits = {fwd_source, fwd_mediator, fwd_target, 0}, .front_gate_idx = i};
+                op_t teleport_op = {.type = OP_TELEPORT, .qubits = {fwd_source, fwd_mediator, fwd_target, 0}, .front_gate_idx = ts->attraction_paths_front_idx[i]};
                 telesabre_add_candidate_op(ts, &teleport_op);
             }
 
@@ -752,6 +763,11 @@ graph_t* telesabre_build_contracted_graph_for_pair(
         if (layout_get_core_remaining_capacity(layout, core) <= 2) {
             graph_increase_node_weight(graph, node_id, ts->config->full_core_penalty);
         }
+
+        // Gate qubit in communication qubit penalty
+        if (pc == start_qubit || pc == end_qubit) {
+            graph_increase_node_weight(graph, node_id, 1);
+        }
     }
 
     return graph;
@@ -857,6 +873,8 @@ void telesabre_step(telesabre_t* ts) {
     }
 
     // Search for qubit movement operations
+    int old_front_size = ts->front_size;
+    if (ts->safety_valve_activated) ts->front_size = 1;
 
     telesabre_calculate_attraction_paths(ts);
 
@@ -865,6 +883,8 @@ void telesabre_step(telesabre_t* ts) {
 
     telesabre_collect_candidate_tele_ops(ts);
     telesabre_collect_candidate_swap_ops(ts);
+
+    ts->front_size = old_front_size;
 
     // Debug candidate op print
     printf(H2COL"  Candidate Operations:\n"CRESET);
@@ -924,6 +944,13 @@ result_t telesabre_run(config_t* config, device_t* device, circuit_t* circuit) {
         telesabre_step(ts);
     }
 
+    if (ts->it >= config->max_iterations) {
+        printf(H1COL"\nTeleSABRE reached maximum iterations (%d).\n" CRESET, config->max_iterations);
+    } else if (ts->front_size == 0) {
+        printf(H1COL"\nTeleSABRE completed all gates successfully.\n" CRESET);
+        ts->result.success = true;
+    }
+
     // Final print
     double elapsed = (double)(clock() - start) / CLOCKS_PER_SEC;
     printf(H1COL"\nTeleSABRE completed in %.3fs.\n" CRESET, elapsed);
@@ -970,6 +997,8 @@ void telesabre_free(telesabre_t* ts) {
             path_free(ts->attraction_paths[i]);
     
     free(ts->attraction_paths);
+    free(ts->attraction_paths_front_idx);
+
     free(ts->traversed_comm_qubits);
     free(ts->nearest_free_qubits);
 

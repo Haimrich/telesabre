@@ -67,6 +67,14 @@ int main(int argc, char *argv[]) {
 
     device_print(device);
 
+    printf("\nResult:\n");
+    printf("  Depth: %d\n", result.depth);
+    printf("  Teledata: %d\n", result.num_teledata);
+    printf("  Telegate: %d\n", result.num_telegate);
+    printf("  Swaps: %d\n", result.num_swaps);
+    printf("  Deadlocks: %d\n", result.num_deadlocks);
+    printf("  Success: %s\n", result.success ? "true" : "false");
+
     device_free(device);
     circuit_free(circuit);
     config_free(config);
