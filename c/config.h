@@ -37,6 +37,7 @@ typedef struct config {
     float extended_set_factor;
 
     int full_core_penalty;
+    int inter_core_edge_weight;
     int max_solving_deadlock_iterations;
 
     float swap_decay;

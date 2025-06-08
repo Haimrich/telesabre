@@ -22,25 +22,30 @@ typedef struct {
 } path_t;
 
 typedef struct {
-    adj_list_t* adj;
+    adj_list_t *adj;
     size_t num_nodes;
+    int *node_weights;
 } graph_t;
 
 
-graph_t* graph_new(size_t num_nodes);
+graph_t *graph_new(size_t num_nodes);
 
-void graph_free(graph_t* graph);
+void graph_free(graph_t *graph);
 
-void graph_add_directed_edge(graph_t* graph, int u, int v, int w);
+void graph_add_directed_edge(graph_t *graph, int u, int v, int w);
 
-void graph_add_edge(graph_t* graph, int u, int v, int w);
+void graph_add_edge(graph_t *graph, int u, int v, int w);
 
-path_t* graph_dijkstra(const graph_t* graph, int src, int dst);
+void graph_set_node_weight(graph_t *graph, int node, int weight);
 
-void graph_print(const graph_t* graph, const int *node_ids_translation);
+void graph_increase_node_weight(graph_t *graph, int node, int weight);
 
-graph_t* graph_copy(const graph_t* src);
+path_t *graph_dijkstra(const graph_t *graph, int src, int dst);
 
-path_t* path_copy(const path_t* src);
+void graph_print(const graph_t *graph, const int *node_ids_translation);
 
-void path_free(path_t* path);
+graph_t *graph_copy(const graph_t *src);
+
+path_t *path_copy(const path_t *src);
+
+void path_free(path_t *path);

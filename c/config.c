@@ -29,6 +29,7 @@ config_t* config_new() {
     config->extended_set_factor = 0.05f;
 
     config->full_core_penalty = 10;
+    config->inter_core_edge_weight = 2;
     config->max_solving_deadlock_iterations = 300;
 
     config->swap_decay = 0.002;
@@ -75,6 +76,7 @@ config_t *config_from_json(const char* filename) {
         X(safety_valve_iters) \
         X(extended_set_size) \
         X(full_core_penalty) \
+        X(inter_core_edge_weight) \
         X(max_solving_deadlock_iterations) \
         X(init_layout_hun_min_free_gate) \
         X(init_layout_hun_min_free_qubit) \

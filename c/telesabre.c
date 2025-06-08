@@ -672,6 +672,8 @@ graph_t* telesabre_build_contracted_graph_for_pair(
     pqubit_t start_qubit = layout_get_phys(layout, gate->target_qubits[0]);
     pqubit_t end_qubit = layout_get_phys(layout, gate->target_qubits[1]);
     
+    // Edge Weights
+    
     // Add edges between communication qubits in same core
     for (int c = 0; c < device->num_cores; c++) {
         for (int j = 0; j < device->core_num_comm_qubits[c]; j++) {
@@ -680,31 +682,11 @@ graph_t* telesabre_build_contracted_graph_for_pair(
                 pqubit_t pc2 = device->core_comm_qubits[c][k];
 
                 int distance = device_get_distance(ts->device, pc1, pc2);
-                distance *= 2;
 
                 int pc1_node = device->comm_qubit_node_id[pc1];
                 int pc2_node = device->comm_qubit_node_id[pc2];
 
                 if (pc1_node == pc2_node) continue;
-                
-                if (pc1 == start_qubit || pc1 == end_qubit) {
-                    distance += 1;
-                }
-                if (pc2 == start_qubit || pc2 == end_qubit) {
-                    distance += 1;
-                }
-                
-                // Nearest Free Penalty
-                float nearest_free_distance_1 = heap_get_min(layout->nearest_free_qubits[pc1_node]).priority;
-                distance += nearest_free_distance_1;
-                float nearest_free_distance_2 = heap_get_min(layout->nearest_free_qubits[pc2_node]).priority;
-                distance += nearest_free_distance_2;
-
-                // Full core penalty
-                core_t core = device->phys_to_core[pc1];
-                if (layout_get_core_remaining_capacity(layout, core) <= 2) {
-                    distance += ts->config->full_core_penalty;
-                }
 
                 graph_add_edge(graph, pc1_node, pc2_node, distance);
             }
@@ -715,33 +697,11 @@ graph_t* telesabre_build_contracted_graph_for_pair(
     for (int e = 0; e < device->num_intercore_edges; e++) {
         pqubit_t pc1 = device->inter_core_edges[e].p1;
         pqubit_t pc2 = device->inter_core_edges[e].p2;
+        
+        int distance = ts->config->inter_core_edge_weight;
+        
         int pc1_node = device->comm_qubit_node_id[pc1];
         int pc2_node = device->comm_qubit_node_id[pc2];
-        int distance = 2;
-        distance *= 2;
-        
-        // Penalty for start and end qubit in comm qubit
-        if (pc1 == start_qubit || pc1 == end_qubit) {
-            distance += 1;
-        }
-        if (pc2 == start_qubit || pc2 == end_qubit) {
-            distance += 1;
-        }
-        
-        // Full Core Penalty
-        core_t core1 = device->phys_to_core[pc1];
-        if (layout_get_core_remaining_capacity(layout, core1) <= 2) {
-            distance += ts->config->full_core_penalty;
-        }
-        core_t core2 = device->phys_to_core[pc2];
-        if (layout_get_core_remaining_capacity(layout, core2) <= 2) {
-            distance += ts->config->full_core_penalty;
-        }
-        // Nearest Free Penalty
-        float nearest_free_distance_1 = heap_get_min(layout->nearest_free_qubits[pc1_node]).priority;
-        distance += nearest_free_distance_1;
-        float nearest_free_distance_2 = heap_get_min(layout->nearest_free_qubits[pc2_node]).priority;
-        distance += nearest_free_distance_2;
 
         graph_add_edge(graph, pc1_node, pc2_node, distance);
     }
@@ -750,51 +710,47 @@ graph_t* telesabre_build_contracted_graph_for_pair(
     core_t start_core = device->phys_to_core[start_qubit];
     for (int j = 0; j < device->core_num_comm_qubits[start_core]; j++) {
         pqubit_t pc = device->core_comm_qubits[start_core][j];
-        int distance = abs(device_get_distance(ts->device, start_qubit, pc) - 1);
-        distance *= 2;
 
-        // Graph Node Ids
+        int distance = abs(device_get_distance(ts->device, start_qubit, pc) - 1);
+
         int start_qubit_node = node_ids_out[0];
         int pc_node = device->comm_qubit_node_id[pc];
 
-        // Nearest Free Penalty
-        float nearest_free_distance = heap_get_min(layout->nearest_free_qubits[pc_node]).priority;
-        distance += nearest_free_distance;
-
-        // Full core penalty
-        core_t core = device->phys_to_core[pc];
-        if (layout_get_core_remaining_capacity(layout, core) <= 2) {
-            distance += ts->config->full_core_penalty;
-        }
-
-        if (start_qubit_node != pc_node) {
-            graph_add_directed_edge(graph, start_qubit_node, pc_node, distance);
-        }
+        if (start_qubit_node == pc_node) continue;
+        
+        graph_add_directed_edge(graph, start_qubit_node, pc_node, distance);
     }
 
     // Add edges to end qubit from all communication qubits in the same core
     core_t end_core = device->phys_to_core[end_qubit];
     for (int j = 0; j < device->core_num_comm_qubits[end_core]; j++) {
         pqubit_t pc = device->core_comm_qubits[end_core][j];
-        int distance = abs(device_get_distance(ts->device, end_qubit, pc) - 1);
-        distance *= 2;
         
-        // Graph Node Ids
+        int distance = abs(device_get_distance(ts->device, end_qubit, pc) - 1);
+        
         int pc_node = device->comm_qubit_node_id[pc];
         int end_qubit_node = node_ids_out[1];
+        
+        if (pc_node == end_qubit_node) continue;
+        
+        graph_add_directed_edge(graph, pc_node, end_qubit_node, distance);
+    }
 
-        // Nearest Free Penalty
-        float nearest_free_distance = heap_get_min(layout->nearest_free_qubits[pc_node]).priority;
-        distance += nearest_free_distance;
+    // Node Weights
+
+    for (int i = 0; i < device->num_comm_qubits; i++) {
+        pqubit_t pc = device->comm_qubits[i];
+        int node_id = device->comm_qubit_node_id[pc];
+        graph_set_node_weight(graph, node_id, 0);
+        
+        // Free qubit distance penalty
+        int nearest_free_distance = heap_get_min(layout->nearest_free_qubits[node_id]).priority;
+        graph_increase_node_weight(graph, node_id, nearest_free_distance);
 
         // Full core penalty
         core_t core = device->phys_to_core[pc];
         if (layout_get_core_remaining_capacity(layout, core) <= 2) {
-            distance += ts->config->full_core_penalty;
-        }
-        
-        if (pc_node != end_qubit_node) {
-            graph_add_directed_edge(graph, pc_node, end_qubit_node, distance);
+            graph_increase_node_weight(graph, node_id, ts->config->full_core_penalty);
         }
     }
 
