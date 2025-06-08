@@ -4,10 +4,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "json.h"
 #include "utils.h"
 
 
-device_t* new_grid_device(int core_x, int core_y, int qubit_x, int qubit_y) {
+device_t* device_new_grid(int core_x, int core_y, int qubit_x, int qubit_y) {
     device_t* dev = malloc(sizeof(device_t));
     *dev = (device_t){0};
 
@@ -61,6 +62,78 @@ device_t* new_grid_device(int core_x, int core_y, int qubit_x, int qubit_y) {
     device_build_teleport_edges(dev);
     device_calculate_distance_matrix(dev);
 
+    dev->json = NULL;
+    return dev;
+}
+
+device_t *device_from_json(const char *filename) {
+    const char *device_json_str = read_file(filename);
+    cJSON *device_json_file = cJSON_Parse(device_json_str);
+
+    if (device_json_file == NULL) {
+        fprintf(stderr, "Error parsing JSON from file %s\n", filename);
+        free((void*)device_json_str);
+        return NULL;
+    }
+
+    const cJSON *device_json = cJSON_GetObjectItemCaseSensitive(device_json_file, "device");
+    if (device_json == NULL) {
+        cJSON_Delete(device_json_file);
+        free((void*)device_json_str);
+        return NULL;
+    }
+
+    printf("Loading device from JSON file: %s\n", filename);
+
+    device_t *dev = malloc(sizeof(device_t));
+    *dev = (device_t){0};
+
+    strncpy(dev->name, cJSON_GetObjectItemCaseSensitive(device_json, "name")->valuestring, sizeof(dev->name) - 1);
+    dev->num_qubits = cJSON_GetObjectItemCaseSensitive(device_json, "num_qubits")->valueint;
+    dev->num_cores = cJSON_GetObjectItemCaseSensitive(device_json, "num_cores")->valueint;
+    dev->core_capacity = dev->num_qubits / dev->num_cores;
+
+    dev->phys_to_core = malloc(sizeof(core_t) * dev->num_qubits);
+    for (pqubit_t i = 0; i < dev->num_qubits; i++) {
+        dev->phys_to_core[i] = i / dev->core_capacity;
+    }
+
+    dev->core_qubits = malloc(sizeof(pqubit_t*) * dev->num_cores);
+    for (core_t c = 0; c < dev->num_cores; c++) {
+        dev->core_qubits[c] = malloc(sizeof(pqubit_t) * dev->core_capacity);
+        for (pqubit_t i = 0; i < dev->core_capacity; i++) {
+            dev->core_qubits[c][i] = c * dev->core_capacity + i;
+        }
+    }
+
+    const cJSON *edge_json = NULL;
+
+    const cJSON *inter_core_edges_json = cJSON_GetObjectItemCaseSensitive(device_json, "inter_core_edges");
+    dev->num_intercore_edges = 0;
+    dev->inter_core_edges = malloc(sizeof(device_edge_t) * cJSON_GetArraySize(inter_core_edges_json));
+    cJSON_ArrayForEach(edge_json, inter_core_edges_json) {
+        dev->inter_core_edges[dev->num_intercore_edges++] = (device_edge_t){
+            .p1 = cJSON_GetArrayItem(edge_json, 0)->valueint,
+            .p2 = cJSON_GetArrayItem(edge_json, 1)->valueint
+        };
+    }
+
+    const cJSON *edges_json = cJSON_GetObjectItemCaseSensitive(device_json, "intra_core_edges");
+    dev->num_edges = 0;
+    dev->edges = malloc(sizeof(device_edge_t) * cJSON_GetArraySize(edges_json));
+    cJSON_ArrayForEach(edge_json, edges_json) {
+        dev->edges[dev->num_edges++] = (device_edge_t){
+            .p1 = cJSON_GetArrayItem(edge_json, 0)->valueint,
+            .p2 = cJSON_GetArrayItem(edge_json, 1)->valueint
+        };
+    }
+
+    device_update_qubit_to_edges(dev);
+    device_build_teleport_edges(dev);
+    device_calculate_distance_matrix(dev);
+    
+    dev->json = cJSON_Duplicate(device_json, true);
+    cJSON_Delete(device_json_file);
     return dev;
 }
 
@@ -205,18 +278,7 @@ bool device_has_edge(const device_t* device, pqubit_t p1, pqubit_t p2) {
     if (p1 == p2) return true;  // Self-loop is always present
     if (p1 >= device->num_qubits || p2 >= device->num_qubits) return false;  // Out of bounds
 
-    core_t c1 = device->phys_to_core[p1];
-    core_t c2 = device->phys_to_core[p2];
-
-    if (c1 == c2) {
-        // Check intra-core edges
-        for (int i = 0; i < device->qubit_num_edges[p1]; i++) {
-            if (device->qubit_to_edges[p1][i].p1 == p2 || device->qubit_to_edges[p1][i].p2 == p2) {
-                return true;
-            }
-        }
-    }
-    return false;
+    return device_get_distance(device, p1, p2) == 1; 
 }
 
 
@@ -289,6 +351,8 @@ void device_free(device_t* dev) {
         free(dev->distance_matrix);
     }
 
+    if (dev->json) cJSON_Delete(dev->json);
+
     free(dev);
 }
 
@@ -297,7 +361,7 @@ void device_free(device_t* dev) {
 
 
 device_t* device_a() {
-    device_t* dev = new_grid_device(2, 2, 3, 3);
+    device_t* dev = device_new_grid(2, 2, 3, 3);
     if (dev->inter_core_edges != NULL) free(dev->inter_core_edges);
     dev->num_intercore_edges = 4;
     dev->inter_core_edges = malloc(sizeof(device_edge_t) * dev->num_intercore_edges);
@@ -315,7 +379,7 @@ device_t* device_a() {
 
 
 device_t* device_b() {
-    device_t* dev = new_grid_device(3, 1, 2, 2);
+    device_t* dev = device_new_grid(3, 1, 2, 2);
     if (dev->inter_core_edges != NULL) free(dev->inter_core_edges);
     dev->num_intercore_edges = 2;
     dev->inter_core_edges = malloc(sizeof(device_edge_t) * dev->num_intercore_edges);
@@ -331,7 +395,7 @@ device_t* device_b() {
 
 
 device_t* device_c() {
-    device_t* dev = new_grid_device(3, 3, 3, 3);
+    device_t* dev = device_new_grid(3, 3, 3, 3);
     if (dev->inter_core_edges != NULL) free(dev->inter_core_edges);
     dev->num_intercore_edges = 24;
     dev->inter_core_edges = malloc(sizeof(device_edge_t) * dev->num_intercore_edges);
@@ -376,7 +440,7 @@ device_t* device_c() {
 */
 
 device_t* device_d() {
-    device_t* dev = new_grid_device(2, 2, 2, 2);
+    device_t* dev = device_new_grid(2, 2, 2, 2);
     if (dev->inter_core_edges != NULL) free(dev->inter_core_edges);
     dev->num_intercore_edges = 4;
     dev->inter_core_edges = malloc(sizeof(device_edge_t) * dev->num_intercore_edges);
@@ -405,7 +469,7 @@ device_t* device_d() {
 */
 
 device_t* device_e() {
-    device_t* dev = new_grid_device(2, 2, 4, 4);
+    device_t* dev = device_new_grid(2, 2, 4, 4);
     if (dev->inter_core_edges != NULL) free(dev->inter_core_edges);
     dev->num_intercore_edges = 4;
     dev->inter_core_edges = malloc(sizeof(device_edge_t) * dev->num_intercore_edges);
@@ -435,7 +499,7 @@ device_t* device_e() {
 */
 
 device_t* device_f() {
-    device_t* dev = new_grid_device(2, 2, 4, 4);
+    device_t* dev = device_new_grid(2, 2, 4, 4);
     if (dev->inter_core_edges != NULL) free(dev->inter_core_edges);
     dev->num_intercore_edges = 8;
     dev->inter_core_edges = malloc(sizeof(device_edge_t) * dev->num_intercore_edges);
@@ -468,7 +532,7 @@ device_t* device_f() {
 */
 
 device_t* device_g() {
-    device_t* dev = new_grid_device(2, 2, 4, 4);
+    device_t* dev = device_new_grid(2, 2, 4, 4);
     if (dev->inter_core_edges != NULL) free(dev->inter_core_edges);
     dev->num_intercore_edges = 6;
     dev->inter_core_edges = malloc(sizeof(device_edge_t) * dev->num_intercore_edges);
@@ -499,7 +563,7 @@ device_t* device_h() {
         56 57 58 59  -  72  73  74  75  -  88  89  90  91
         60 61 62 63     76  77  78  79     92  93  94  95
     */
-    device_t* dev = new_grid_device(3, 2, 4, 4);
+    device_t* dev = device_new_grid(3, 2, 4, 4);
     if (dev->inter_core_edges != NULL) free(dev->inter_core_edges);
     dev->num_intercore_edges = 7;
     dev->inter_core_edges = malloc(sizeof(device_edge_t) * dev->num_intercore_edges);

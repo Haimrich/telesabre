@@ -6,9 +6,14 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "json.h"
+#include "utils.h"
 
-circuit_t* parse_qasm_file(const char* filename) 
+
+circuit_t* circuit_from_qasm(const char* filename) 
 {
+    printf("Loading circuit from QASM file: %s\n", filename);
+
     regex_t regex;
     char regex_str[] = "([[:alnum:]_]*)(\\([[:alnum:]_\\./-]*\\))* ([[:alnum:]_]*)\\[([0-9]*)\\](,([[:alnum:]_]+)\\[([0-9]*)\\])*;";
     int ret = regcomp(&regex, regex_str, REG_EXTENDED);
@@ -27,9 +32,11 @@ circuit_t* parse_qasm_file(const char* filename)
 
     char line[QASM_MAX_LINE_LENGTH];
     circuit_t *circuit = malloc(sizeof(circuit_t));
+    filepath_basename(filename, circuit->name, sizeof(circuit->name));
     circuit->num_qubits = 0;
     circuit->num_gates = 0;
     circuit->gates = NULL;
+    circuit->json = NULL;
 
     regmatch_t matches[8];
     
@@ -141,15 +148,103 @@ circuit_t* parse_qasm_file(const char* filename)
             fprintf(stderr, "Regex match failed: %s\n", error_buffer);
         }
     }
+
     fclose(file);
+    regfree(&regex);
+    if (qregs) {
+        for (int i = 0; i < num_qregs; i++)
+            if (qregs[i])
+                free(qregs[i]);
+        free(qregs);
+        free(qregs_sizes);
+    }
 
     circuit_build_dependencies(circuit);
+    circuit_build_json(circuit);
+
+    return circuit;
+}
+
+
+circuit_t *circuit_from_json(const char *filename) {
+    const char *circuit_json_str = read_file(filename);
+    cJSON *circuit_json_file = cJSON_Parse(circuit_json_str);
+
+    if (circuit_json_file == NULL) {
+        fprintf(stderr, "Error parsing JSON from file %s\n", filename);
+        free((void*)circuit_json_file);
+        return NULL;
+    }
+
+    const cJSON *circuit_json = cJSON_GetObjectItemCaseSensitive(circuit_json_file, "circuit");
+    if (circuit_json == NULL) {
+        cJSON_Delete(circuit_json_file);
+        free((void*)circuit_json_str);
+        return NULL;
+    }
+
+    printf("Loading circuit from JSON file: %s\n", filename);    
+    circuit_t *circuit = malloc(sizeof(circuit_t));
+    *circuit = (circuit_t){0};
+    circuit->json = NULL;
+
+    const cJSON *name_json = cJSON_GetObjectItemCaseSensitive(circuit_json, "name");
+    if (name_json && cJSON_IsString(name_json)) {
+        strncpy(circuit->name, name_json->valuestring, sizeof(circuit->name) - 1);
+        circuit->name[sizeof(circuit->name) - 1] = '\0';
+    } else {
+        strcpy(circuit->name, "circuit");
+    }
+
+    circuit->num_qubits = cJSON_GetObjectItemCaseSensitive(circuit_json, "num_qubits")->valueint;
+
+    const cJSON *gates_json = cJSON_GetObjectItemCaseSensitive(circuit_json, "gates");
+    circuit->num_gates = 0;
+    circuit->gates = calloc(cJSON_GetArraySize(gates_json), sizeof(gate_t));
+    cJSON *gate_json = NULL;
+    cJSON_ArrayForEach(gate_json, gates_json) {
+        gate_t *gate = &circuit->gates[circuit->num_gates++];
+        gate->id = circuit->num_gates - 1;
+
+        if (cJSON_IsArray(gate_json)) {
+            gate->num_target_qubits = cJSON_GetArraySize(gate_json);
+            for (size_t i = 0; i < gate->num_target_qubits; i++) {
+                gate->target_qubits[i] = cJSON_GetArrayItem(gate_json, i)->valueint;
+            }
+            strcpy(gate->type, "unknown");
+        } else {
+            const cJSON *type_json = cJSON_GetObjectItemCaseSensitive(gate_json, "type");
+            strncpy(gate->type, type_json->valuestring, sizeof(gate->type) - 1);
+            gate->type[sizeof(gate->type) - 1] = '\0';
+
+            const cJSON *targets_json = cJSON_GetObjectItemCaseSensitive(gate_json, "targets");
+            gate->num_target_qubits = cJSON_GetArraySize(targets_json);
+            for (size_t i = 0; i < gate->num_target_qubits; i++) {
+                gate->target_qubits[i] = cJSON_GetArrayItem(targets_json, i)->valueint;
+            }
+        }
+        gate->num_children = 0;
+        gate->num_parents = 0;
+    }
+
+    circuit_build_dependencies(circuit);
+    circuit_build_json(circuit);
+
+    cJSON_Delete(circuit_json_file);
     return circuit;
 }
 
 
 void circuit_build_dependencies(circuit_t* circuit) 
 {
+    for (size_t i = 0; i < circuit->num_gates; i++)
+    {
+        gate_t *gate = &circuit->gates[i];
+        gate->num_children = 0;
+        gate->num_parents = 0;
+        memset(gate->children_id, -1, sizeof(gate->children_id));
+    }
+    
     size_t *last_gate_per_qubit = malloc(sizeof(size_t) * circuit->num_qubits);
     for (size_t i = 0; i < circuit->num_qubits; i++)
         last_gate_per_qubit[i] = -1;
@@ -170,6 +265,53 @@ void circuit_build_dependencies(circuit_t* circuit)
         }
     }
     
+}
+
+
+void circuit_build_json(circuit_t *circuit) {
+    if (!circuit) return;
+    if (circuit->json) {
+        cJSON_Delete(circuit->json);
+        circuit->json = NULL;
+    }
+
+    circuit->json = cJSON_CreateObject();
+    cJSON_AddStringToObject(circuit->json, "name", circuit->name);
+    cJSON_AddNumberToObject(circuit->json, "num_qubits", circuit->num_qubits);
+    cJSON *gates_json = cJSON_CreateArray();
+    for (size_t i = 0; i < circuit->num_gates; i++) {
+        gate_t *gate = &circuit->gates[i];
+        cJSON *gate_json = cJSON_CreateIntArray(gate->target_qubits, gate->num_target_qubits);
+        cJSON_AddItemToArray(gates_json, gate_json);
+    }
+    cJSON_AddItemToObject(circuit->json, "gates", gates_json);
+    cJSON_AddNumberToObject(circuit->json, "num_gates", circuit->num_gates);
+    cJSON *dag_json = cJSON_CreateArray();
+    for (size_t i = 0; i < circuit->num_gates; i++) {
+        gate_t *gate = &circuit->gates[i];
+        for (size_t j = 0; j < gate->num_children; j++) {
+            cJSON *edge_json = cJSON_CreateArray();
+            cJSON_AddItemToArray(edge_json, cJSON_CreateNumber(gate->id));
+            cJSON_AddItemToArray(edge_json, cJSON_CreateNumber(gate->children_id[j]));
+            cJSON_AddItemToArray(dag_json, edge_json);
+        }
+    }
+    cJSON_AddItemToObject(circuit->json, "dag", dag_json);
+
+    // Calculate node positions
+    sliced_circuit_view_t *view = circuit_get_sliced_view(circuit, false);
+    float (*node_positions)[2] = malloc(sizeof(float) * 2 * circuit->num_gates);
+    multipartite_graph_layout(circuit->num_gates, view->gate_slices, view->num_slices, view->slice_sizes, 1.0, 1.0, node_positions);
+    cJSON *positions_json = cJSON_CreateArray();
+    for (size_t i = 0; i < circuit->num_gates; i++) {
+        cJSON *pos_json = cJSON_CreateArray();
+        cJSON_AddItemToArray(pos_json, cJSON_CreateNumber(node_positions[i][0]));
+        cJSON_AddItemToArray(pos_json, cJSON_CreateNumber(node_positions[i][1]));
+        cJSON_AddItemToArray(positions_json, pos_json);
+    }
+    cJSON_AddItemToObject(circuit->json, "node_positions", positions_json);
+    free(node_positions);
+    sliced_circuit_view_free(view);
 }
 
 
@@ -202,41 +344,6 @@ void circuit_print(circuit_t* circuit)
         printf("\n");
     }
 }
-
-
-/*
-def slice_circuit_(self) -> tuple:
-    self.gates_slice = [None] * self.num_gates
-    slices = defaultdict(list)
-    
-    def add_gate(gate_id, t):
-        if gate_id in slices[t]:
-            return
-
-        used_qubits_in_slice = set().union(*[self.gates[gid] for gid in slices[t]])
-        if any(q in used_qubits_in_slice for q in self.gates[gate_id]):
-            t += 1
-            slices[t].append(gate_id)
-            self.gates_slice[gate_id] = t
-            return
-        
-        if t == 0:
-            slices[t].append(gate_id)
-            self.gates_slice[gate_id] = t
-            return
-        
-        add_gate(gate_id, t-1)
-        
-    for g, gate in enumerate(self.gates):
-        t = len(list(s for s in slices.values() if s))
-        add_gate(g, t)
-    
-    self.slices = tuple(tuple(slices[t]) for t in range(len(slices)) if slices[t])
-    self.num_slices = len(self.slices)
-    
-    assert None not in self.gates_slice
-
-*/
 
 
 sliced_circuit_view_t* circuit_get_sliced_view(circuit_t* circuit, bool two_qubit_only) {
@@ -326,9 +433,7 @@ void sliced_circuit_view_print(sliced_circuit_view_t* view)
 }
 
 
-
-
-void free_circuit(circuit_t* circuit) 
+void circuit_free(circuit_t* circuit) 
 {
     if (circuit->gates != NULL)
         free(circuit->gates);
@@ -337,7 +442,7 @@ void free_circuit(circuit_t* circuit)
 }
 
 
-void free_sliced_circuit_view(sliced_circuit_view_t* view) 
+void sliced_circuit_view_free(sliced_circuit_view_t* view) 
 {
     if (view->slice_sizes != NULL)
         free(view->slice_sizes);

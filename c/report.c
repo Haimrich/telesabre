@@ -2,10 +2,12 @@
 
 #include <stdio.h>
 
+#include "config.h"
+#include "device.h"
 #include "circuit.h"
-#include "json.h"
 #include "op.h"
 #include "utils.h"
+#include "json.h"
 
 
 report_t* report_new() {
@@ -17,6 +19,7 @@ report_t* report_new() {
     return report;
 }
 
+
 void report_ensure_capacity(report_t *report) {
     if (report->num_entries < report->capacity) return;
     report->capacity *= 2;
@@ -24,37 +27,24 @@ void report_ensure_capacity(report_t *report) {
 }
 
 
-/*iterations_data.append({
-                    'phys_to_virt': layout.phys_to_virt.tolist(),
-                    'virt_to_phys': layout.virt_to_phys.tolist(),
-                    'swap_count': swap_count,
-                    'teleportation_count': teleportation_count,
-                    'telegate_count': telegate_count,
-                    'remaining_nodes': list(dag.nodes),
-                    'front': front,
-                    'gates': executed_gates_nodes,
-                    'applied_gates': executed_gates,
-                    'applied_ops': executed_ops,
-                    'needed_paths': expanded_paths,
-                    'energy': calculate_energy(config, dag, architecture, layout, nearest_free_to_comms_queues, 1, node_to_gate, local_distance_matrix, full_core_penalty, solving_deadlock),
-                    'candidate_ops': candidate_ops,
-                    'candidate_ops_scores': scores,
-                    'candidate_ops_front_scores': front_scores,
-                    'candidate_ops_future_scores': future_scores,
-                    'solving_deadlock': solving_deadlock,
-                })*/
-
-void report_save_as_json(const report_t *report, const char *filename) {
-    cJSON *json = cJSON_CreateArray();
+void report_save_as_json(
+    const report_t *report, 
+    const config_t *config,
+    const device_t *device,
+    const circuit_t *circuit,
+    const char *filename
+) {
+    cJSON *json = cJSON_CreateObject();
+    cJSON *iters_json = cJSON_CreateArray();
     
     for (size_t i = 0; i < report->num_entries; i++) {
         const report_entry_t* entry = &report->entries[i];
         cJSON *entry_json = cJSON_CreateObject();
 
-        cJSON *phys_to_virt = cJSON_CreateIntArray(entry->phys_to_virt, entry->front_size);
+        cJSON *phys_to_virt = cJSON_CreateIntArray(entry->phys_to_virt, device->num_qubits);
         cJSON_AddItemToObject(entry_json, "phys_to_virt", phys_to_virt);
         
-        cJSON *virt_to_phys = cJSON_CreateIntArray(entry->virt_to_phys, entry->front_size);
+        cJSON *virt_to_phys = cJSON_CreateIntArray(entry->virt_to_phys, device->num_qubits);
         cJSON_AddItemToObject(entry_json, "virt_to_phys", virt_to_phys);
         
         cJSON_AddNumberToObject(entry_json, "swap_count", entry->num_swaps);
@@ -109,10 +99,23 @@ void report_save_as_json(const report_t *report, const char *filename) {
 
         cJSON_AddNumberToObject(entry_json, "iteration", entry->it); 
 
-        cJSON_AddItemToArray(json, entry_json);       
+        cJSON_AddItemToArray(iters_json, entry_json);       
+    }
+
+    cJSON_AddItemToObject(json, "iterations", iters_json);
+
+    if (config && config->json) {
+        cJSON_AddItemToObject(json, "config", cJSON_Duplicate(config->json, 1));
+    }
+    if (device && device->json) {
+        cJSON_AddItemToObject(json, "device", cJSON_Duplicate(device->json, 1));
+    }
+    if (circuit && circuit->json) {
+        cJSON_AddItemToObject(json, "circuit", cJSON_Duplicate(circuit->json, 1));
     }
 
     char *json_string = cJSON_Print(json);
+    cJSON_Delete(json);
 
     FILE *file = fopen(filename, "w");
     if (file) {

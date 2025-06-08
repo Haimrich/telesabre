@@ -5,8 +5,6 @@
 #include <string.h>
 #include <time.h>
 
-#include "json.h"
-
 #include "circuit.h"
 #include "config.h"
 #include "device.h"
@@ -101,6 +99,7 @@ void telesabre_safety_valve_check(telesabre_t *ts) {
     }
 }
 
+
 void telesabre_execute_front_gate(telesabre_t* ts, size_t front_gate_idx) {
     const gate_t* gate = &ts->circuit->gates[ts->front[front_gate_idx]];
 
@@ -132,6 +131,10 @@ void telesabre_execute_front_gate(telesabre_t* ts, size_t front_gate_idx) {
         size_t child_id = gate->children_id[j];
         ts->gate_num_remaining_parents[child_id]--;
         if (ts->gate_num_remaining_parents[child_id] == 0) {
+            if (child_id == 0) {
+                printf("adding node 0 again wtf\n");
+                exit(1);
+            }
             ts->front[ts->front_size++] = child_id;
         }
     }
@@ -139,6 +142,7 @@ void telesabre_execute_front_gate(telesabre_t* ts, size_t front_gate_idx) {
     // Mark remaining circuit slices for update
     ts->slices_outdated = true;
 }
+
 
 void telesabre_made_progress(telesabre_t* ts) {
     ts->it_without_progress = 0;
@@ -162,6 +166,7 @@ void telesabre_calculate_attraction_paths(telesabre_t *ts) {
 
     for (int i = 0; i < ts->front_size; i++) {
         const gate_t* gate = &ts->circuit->gates[ts->front[i]];
+        if (!layout_gate_is_separated(ts->layout, gate)) continue;
         
         size_t separated_node_ids[2] = {0};
         pqubit_t node_id_to_phys[2] = {0};
@@ -263,6 +268,8 @@ void telesabre_collect_nearest_free_qubits(telesabre_t *ts) {
         printf("%d ", ts->nearest_free_qubits[j]);
     printf("\n");
 }
+
+
 void telesabre_slice_remaining_circuit(telesabre_t *ts) {
     size_t num_gates = ts->circuit->num_gates;
     size_t *rem_parents = malloc(sizeof(size_t) * num_gates);
@@ -430,6 +437,7 @@ float telesabre_evaluate_op_energy(telesabre_t* ts, const op_t* op) {
     return energy;
 }
 
+
 void telesabre_add_candidate_op(telesabre_t* ts, const op_t* op) {
     if (ts->num_candidate_ops >= ts->candidate_ops_capacity) {
         ts->candidate_ops_capacity = (ts->candidate_ops_capacity == 0) ? 4 : ts->candidate_ops_capacity * 2;
@@ -459,7 +467,7 @@ void telesabre_collect_candidate_tele_ops(telesabre_t *ts) {
     // Find feasible inter-core operations
     ts->num_candidate_ops = 0;
 
-    for (int i = 0; i < ts->front_size; i++) {
+    for (int i = 0; i < ts->num_attraction_paths; i++) {
         const gate_t* gate = &circuit->gates[ts->front[i]];
         const path_t* shortest_path = ts->attraction_paths[i];
 
@@ -846,10 +854,10 @@ void telesabre_step(telesabre_t* ts) {
         for (int i = 0; i < ts->front_size; i++) {
             const gate_t* gate = &circuit->gates[ts->front[i]];
             if (layout_can_execute_gate(ts->layout, gate)) {
+                ts->applied_gates[ts->num_applied_gates++] = ts->front[i];
                 telesabre_execute_front_gate(ts, i);
                 telesabre_made_progress(ts);
                 found_executable_gate = true;
-                ts->applied_gates[ts->num_applied_gates++] = ts->front[i];
                 break;
             }
         }
@@ -971,7 +979,13 @@ result_t telesabre_run(config_t* config, device_t* device, circuit_t* circuit) {
     result_t result = ts->result;
 
     if (config->save_report) {
-        report_save_as_json(ts->report, config->report_filename);
+        report_save_as_json(
+            ts->report, 
+            ts->config,
+            ts->device,
+            ts->circuit,
+            config->report_filename
+        );
     }
 
     telesabre_free(ts);
@@ -1040,7 +1054,8 @@ void telesabre_add_report_entry(const telesabre_t *ts) {
     entry.num_remaining_gates = num_remaining_gates;
 
     entry.front = malloc(sizeof(int) * ts->front_size);
-    memcpy(entry.front, ts->front, sizeof(int) * ts->front_size);
+    //memcpy(entry.front, ts->front, sizeof(int) * ts->front_size);
+    for (int i = 0; i < ts->front_size; i++) entry.front[i] = ts->front[i];
     entry.front_size = ts->front_size;
 
     entry.applied_gates = malloc(sizeof(int) * ts->num_applied_gates);

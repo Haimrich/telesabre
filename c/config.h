@@ -1,26 +1,27 @@
 #pragma once
 
-#include <stdlib.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include <string.h>
 
+#include "json.h"
 
-enum energy_type {
-    ENERGY_TYPE_EXTENDED_SET,
-    ENERGY_TYPE_EXPONENTIAL
+enum energy_type { 
+    ENERGY_TYPE_EXTENDED_SET, 
+    ENERGY_TYPE_EXPONENTIAL 
 };
 
-enum initial_layout_type {
-    INITIAL_LAYOUT_HUNGARIAN,
-    INITIAL_LAYOUT_ROUND_ROBIN,
-    INITIAL_LAYOUT_RANDOM
+enum initial_layout_type { 
+    INITIAL_LAYOUT_HUNGARIAN, 
+    INITIAL_LAYOUT_ROUND_ROBIN, 
+    INITIAL_LAYOUT_RANDOM 
 };
 
 typedef struct config {
     unsigned seed;
 
     char name[64];
-    
+
     enum energy_type energy_type;
 
     float usage_penalty;
@@ -36,7 +37,6 @@ typedef struct config {
     float extended_set_factor;
 
     int full_core_penalty;
-    bool save_data;
     int max_solving_deadlock_iterations;
 
     float swap_decay;
@@ -49,11 +49,14 @@ typedef struct config {
     int max_iterations;
 
     bool save_report;
-
     char report_filename[256];
+
+    cJSON *json;
 } config_t;
 
 
-config_t* new_config();
+config_t *config_new();
 
-void free_config(config_t* config);
+config_t *config_from_json(const char *filename);
+
+void config_free(config_t *config);

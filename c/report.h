@@ -2,6 +2,8 @@
 
 #include <stddef.h>
 
+#include "config.h"
+#include "device.h"
 #include "circuit.h"
 #include "graph.h"
 #include "op.h"
@@ -57,8 +59,12 @@ void report_ensure_capacity(report_t *report);
 
 void report_entry_free(report_entry_t *entry);
 
-void report_save_as_json(const report_t *report, const char *filename);
-
-void report_save_as_tubby(const report_t *report, const char *filename);
+void report_save_as_json(
+    const report_t *report, 
+    const config_t *config,
+    const device_t *device,
+    const circuit_t *circuit,
+    const char *filename
+);
 
 void report_free(report_t *report);

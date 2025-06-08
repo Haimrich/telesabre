@@ -22,6 +22,19 @@ int **floyd_warshall(int num_nodes, int edges[][3], int num_edges);
 
 const char *byte_to_binary(unsigned char x);
 
+const char *read_file(const char *filename);
+
+void filepath_basename(const char *path, char *out, size_t out_size);
+
+void multipartite_graph_layout(
+    int num_nodes,
+    const size_t *node_layers,
+    int num_layers,
+    const size_t *layer_sizes,
+    float x_gap,
+    float y_gap,
+    float positions_out[][2]
+);
 
 
 //Regular text

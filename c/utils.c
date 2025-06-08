@@ -99,3 +99,64 @@ const char *byte_to_binary(unsigned char x) {
 
     return b;
 }
+
+
+const char *read_file(const char *filename) {
+    FILE *f = fopen(filename, "rb");
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    rewind(f);
+    char *data = malloc(len + 1);
+    if (!data) { fclose(f); return NULL; }
+    fread(data, 1, len, f);
+    data[len] = '\0';
+    fclose(f);
+    return data;
+}
+
+
+void filepath_basename(const char *path, char *out, size_t out_size) {
+    const char *slash = strrchr(path, '/');
+    const char *backslash = strrchr(path, '\\');
+    const char *fname = path;
+
+    if (slash && (!backslash || slash > backslash))
+        fname = slash + 1;
+    else if (backslash)
+        fname = backslash + 1;
+
+    const char *dot = strrchr(fname, '.');
+    size_t len = dot ? (size_t)(dot - fname) : strlen(fname);
+
+    if (len >= out_size)
+        len = out_size - 1;
+    strncpy(out, fname, len);
+    out[len] = '\0';
+}
+
+
+
+void multipartite_graph_layout(
+    int num_nodes,
+    const size_t *node_layers,
+    int num_layers,
+    const size_t *layer_sizes,
+    float x_gap,
+    float y_gap,
+    float positions_out[][2]
+) {
+    int *layer_pos = calloc(num_layers, sizeof(int));
+
+    for (int i = 0; i < num_nodes; ++i) {
+        int layer = node_layers[i];
+        int pos_in_layer = layer_pos[layer]++;
+        int count_in_layer = layer_sizes[layer];
+
+        double x = layer * x_gap;
+        double y = (pos_in_layer - (count_in_layer - 1) / 2.0) * y_gap;
+        positions_out[i][0] = x;
+        positions_out[i][1] = y;
+    }
+    free(layer_pos);
+}

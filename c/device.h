@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
+#include "json.h"
 
 typedef int core_t;
 
@@ -53,10 +54,14 @@ typedef struct {
     int* core_num_comm_qubits;
 
     core_t* phys_to_core;
+
+    cJSON *json;
 } device_t;
 
 
-device_t* new_grid_device(int core_x, int core_y, int qubit_x, int qubit_y);
+device_t* device_new_grid(int core_x, int core_y, int qubit_x, int qubit_y);
+
+device_t* device_from_json(const char *filename);
 
 void device_update_qubit_to_edges(device_t* device);
 

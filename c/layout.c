@@ -384,7 +384,7 @@ layout_t *initial_layout_hungarian(device_t *device, circuit_t *circuit, config_
     }
 
     // Cleanup
-    free_sliced_circuit_view(sliced_view);
+    sliced_circuit_view_free(sliced_view);
     free(virt_to_core);
     free(core_capacities);
     for (core_t c = 0; c < device->num_cores; c++) free(core_to_virt[c]);
