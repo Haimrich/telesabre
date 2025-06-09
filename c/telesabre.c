@@ -425,6 +425,9 @@ float telesabre_evaluate_op_energy(telesabre_t* ts, const op_t* op) {
                         traffic_size++;
                     }
                 }
+
+                graph_free(contracted_graph);
+                path_free(shortest_path);
             }
 
             if (i == 0) {
@@ -702,7 +705,13 @@ graph_t* telesabre_build_contracted_graph_for_pair(
                 pqubit_t pc1 = device->core_comm_qubits[c][j];
                 pqubit_t pc2 = device->core_comm_qubits[c][k];
 
-                int distance = device_get_distance(ts->device, pc1, pc2);
+                if (pc1 == start_qubit || pc1 == end_qubit ||
+                    pc2 == start_qubit || pc2 == end_qubit) {
+                    continue;
+                }
+
+                //int distance = device_get_distance(ts->device, pc1, pc2);
+                int distance = abs(device_get_distance(ts->device, pc1, pc2) - 1);
 
                 int pc1_node = device->comm_qubit_node_id[pc1];
                 int pc2_node = device->comm_qubit_node_id[pc2];
@@ -723,6 +732,24 @@ graph_t* telesabre_build_contracted_graph_for_pair(
         
         int pc1_node = device->comm_qubit_node_id[pc1];
         int pc2_node = device->comm_qubit_node_id[pc2];
+
+        // Full core penalty
+        if (layout_get_core_remaining_capacity(layout, device->phys_to_core[pc1]) <= 2) {
+            distance += ts->config->full_core_penalty;
+        }
+        if (layout_get_core_remaining_capacity(layout, device->phys_to_core[pc2]) <= 2) {
+            distance += ts->config->full_core_penalty;
+        }
+
+        // Free qubit distance penalty
+        int nearest_free_distance_pc1 = heap_get_min(layout->nearest_free_qubits[pc1_node]).priority;
+        int nearest_free_distance_pc2 = heap_get_min(layout->nearest_free_qubits[pc2_node]).priority;
+        distance += nearest_free_distance_pc1 + nearest_free_distance_pc2;
+
+        // Gate qubit in communication qubit penalty
+        if (pc1 == start_qubit || pc1 == end_qubit) {
+            distance += 1;
+        }
 
         graph_add_edge(graph, pc1_node, pc2_node, distance);
     }
@@ -758,7 +785,7 @@ graph_t* telesabre_build_contracted_graph_for_pair(
     }
 
     // Node Weights
-
+/*
     for (int i = 0; i < device->num_comm_qubits; i++) {
         pqubit_t pc = device->comm_qubits[i];
         graph_set_node_weight(graph, i, 0);
@@ -778,7 +805,7 @@ graph_t* telesabre_build_contracted_graph_for_pair(
             graph_increase_node_weight(graph, i, 1);
         }
     }
-
+*/
     // Traffic
 
     if (traffic) {

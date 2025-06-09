@@ -186,7 +186,7 @@ path_t *path_copy(const path_t *src) {
     if (!src) return NULL;
 
     path_t *copy = malloc(sizeof(path_t));
-    
+
     copy->length = src->length;
     copy->distance = src->distance;
 
@@ -214,5 +214,6 @@ path_t *path_copy(const path_t *src) {
 void path_free(path_t *path) {
     if (!path) return;
     free(path->nodes);
+    free(path->distances);
     free(path);
 }
