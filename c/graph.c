@@ -38,6 +38,26 @@ void graph_increase_edge_weight(graph_t *graph, int u, int v, int w) {
             return;
         }
     }
+    for (size_t i = 0; i < graph->adj[v].degree; ++i) {
+        if (graph->adj[v].edges[i].to == u) {
+            graph->adj[v].edges[i].weight += w;
+            return;
+        }
+    }
+}
+
+
+void graph_increase_node_edges_weights(graph_t *graph, int node, int weight) {
+    for (size_t i = 0; i < graph->adj[node].degree; ++i) {
+        graph->adj[node].edges[i].weight += weight;
+        int neighbor = graph->adj[node].edges[i].to;
+        for (size_t j = 0; j < graph->adj[neighbor].degree; ++j) {
+            if (graph->adj[neighbor].edges[j].to == node) {
+                graph->adj[neighbor].edges[j].weight += weight;
+                break;
+            }
+        }
+    }
 }
 
 

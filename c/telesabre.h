@@ -68,6 +68,7 @@ typedef struct {
     size_t nearest_free_qubits_capacity;
 
     op_t applied_op;
+    float energy;
 
     result_t last_progress_result;
     result_t result;

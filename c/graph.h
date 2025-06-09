@@ -39,6 +39,8 @@ void graph_add_edge(graph_t *graph, int u, int v, int w);
 
 void graph_increase_edge_weight(graph_t *graph, int u, int v, int w);
 
+void graph_increase_node_edges_weights(graph_t *graph, int node, int weight);
+
 void graph_set_node_weight(graph_t *graph, int node, int weight);
 
 void graph_increase_node_weight(graph_t *graph, int node, int weight);

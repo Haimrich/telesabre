@@ -90,6 +90,7 @@ telesabre_t* telesabre_init(config_t* config, device_t* device, circuit_t* circu
         .success = false
     };
 
+    ts->energy = 0.0f;
     ts->report = report_new();
 
     return ts;
@@ -972,6 +973,7 @@ void telesabre_step(telesabre_t* ts) {
         ts->applied_op = best_op;
         telesabre_add_report_entry(ts);
         telesabre_apply_candidate_op(ts, &best_op);
+        ts->energy = ts->candidate_ops_energies[best_op_idx];
     } else {
         printf("    None\n");
         ts->applied_op = (op_t){0};
@@ -1127,9 +1129,7 @@ void telesabre_add_report_entry(const telesabre_t *ts) {
     entry.num_attraction_paths = ts->num_attraction_paths;
 
     entry.applied_op = ts->applied_op;
-
-    // TODO
-    entry.energy = 0.0f;
+    entry.energy = ts->energy;
 
     ts->report->entries[ts->report->num_entries++] = entry;
 }
