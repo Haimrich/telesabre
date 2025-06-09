@@ -14,7 +14,6 @@ config_t* config_new() {
 
     strcpy(config->name, "default");
     config->energy_type = ENERGY_TYPE_EXTENDED_SET;
-    config->usage_penalty = 0.05;
     config->usage_penalties_reset_interval = 5;
 
     config->optimize_initial = false;
@@ -32,9 +31,10 @@ config_t* config_new() {
     config->inter_core_edge_weight = 2;
     config->max_solving_deadlock_iterations = 300;
 
-    config->swap_decay = 0.002;
-    config->teleport_decay = 0.005;
-    config->telegate_decay = 0.005;
+    config->gate_usage_penalty = 0;
+    config->swap_usage_penalty = 0.002;
+    config->teledata_usage_penalty = 0.005;
+    config->telegate_usage_penalty = 0.005;
 
     config->init_layout_hun_min_free_gate = 4;
     config->init_layout_hun_min_free_qubit = 3;
@@ -89,11 +89,11 @@ config_t *config_from_json(const char* filename) {
     #undef CONFIG_INT_ENTRIES
 
     #define CONFIG_FLOAT_ENTRIES \
-        X(usage_penalty) \
-        X(extended_set_factor) \
-        X(swap_decay) \
-        X(teleport_decay) \
-        X(telegate_decay)
+        X(gate_usage_penalty) \
+        X(swap_usage_penalty) \
+        X(teledata_usage_penalty) \
+        X(telegate_usage_penalty) \
+        X(extended_set_factor)
     #define X(name) \
         const cJSON *json_##name = cJSON_GetObjectItemCaseSensitive(config_json, #name); \
         if (json_##name) cfg->name = (float)json_##name->valuedouble;

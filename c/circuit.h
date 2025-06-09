@@ -48,9 +48,9 @@ typedef struct sliced_circuit_view
 
 
 
-bool gate_is_two_qubit(gate_t *gate);
+bool gate_is_two_qubit(const gate_t *gate);
 
-bool gates_share_qubits(gate_t *gate1, gate_t *gate2);
+bool gates_share_qubits(const gate_t *gate1, const gate_t *gate2);
 
 
 circuit_t* circuit_from_qasm(const char *filename);

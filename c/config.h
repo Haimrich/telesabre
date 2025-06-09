@@ -24,7 +24,6 @@ typedef struct config {
 
     enum energy_type energy_type;
 
-    float usage_penalty;
     float usage_penalties_reset_interval;
     bool optimize_initial;
     enum initial_layout_type initial_layout_type;
@@ -40,9 +39,10 @@ typedef struct config {
     int inter_core_edge_weight;
     int max_solving_deadlock_iterations;
 
-    float swap_decay;
-    float teleport_decay;
-    float telegate_decay;
+    float gate_usage_penalty;
+    float swap_usage_penalty;
+    float teledata_usage_penalty;
+    float telegate_usage_penalty;
 
     int init_layout_hun_min_free_gate;
     int init_layout_hun_min_free_qubit;

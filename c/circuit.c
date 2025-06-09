@@ -315,13 +315,13 @@ void circuit_build_json(circuit_t *circuit) {
 }
 
 
-bool gate_is_two_qubit(gate_t *gate)
+bool gate_is_two_qubit(const gate_t *gate)
 {
     return gate->num_target_qubits == 2;
 }
 
 
-bool gates_share_qubits(gate_t *gate1, gate_t *gate2)
+bool gates_share_qubits(const gate_t *gate1, const gate_t *gate2)
 {
     for (size_t i = 0; i < gate1->num_target_qubits; i++)
         for (size_t j = 0; j < gate2->num_target_qubits; j++)

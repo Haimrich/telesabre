@@ -73,11 +73,16 @@ void report_save_as_json(
         cJSON_AddItemToObject(entry_json, "applied_ops", applied_ops);
 
         cJSON *attraction_paths = cJSON_CreateArray();
+        cJSON *attraction_paths_distances = cJSON_CreateArray();
         for (size_t j = 0; j < entry->num_attraction_paths; j++) {
             cJSON *path_json = cJSON_CreateIntArray(entry->attraction_paths[j]->nodes, entry->attraction_paths[j]->length);
             cJSON_AddItemToArray(attraction_paths, path_json);
+            cJSON *path_distances_json = cJSON_CreateIntArray(entry->attraction_paths[j]->distances, entry->attraction_paths[j]->length - 1);
+            cJSON_AddItemToArray(attraction_paths_distances, path_distances_json);
+
         }
         cJSON_AddItemToObject(entry_json, "needed_paths", attraction_paths);
+        cJSON_AddItemToObject(entry_json, "needed_paths_distances", attraction_paths_distances);
 
         cJSON_AddNumberToObject(entry_json, "energy", entry->energy);
 

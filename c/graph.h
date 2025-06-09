@@ -18,7 +18,8 @@ typedef struct {
 typedef struct {
     node_t *nodes;
     size_t length;
-    float distance;
+    int *distances;
+    int distance;
 } path_t;
 
 typedef struct {
@@ -35,6 +36,8 @@ void graph_free(graph_t *graph);
 void graph_add_directed_edge(graph_t *graph, int u, int v, int w);
 
 void graph_add_edge(graph_t *graph, int u, int v, int w);
+
+void graph_increase_edge_weight(graph_t *graph, int u, int v, int w);
 
 void graph_set_node_weight(graph_t *graph, int node, int weight);
 

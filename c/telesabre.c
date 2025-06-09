@@ -122,7 +122,7 @@ void telesabre_execute_front_gate(telesabre_t* ts, size_t front_gate_idx) {
     // Update Usage Penalties
     for (vqubit_t v = 0; v < gate->num_target_qubits; v++) {
         pqubit_t phys = layout_get_phys(ts->layout, gate->target_qubits[v]);
-        ts->usage_penalties[phys] += ts->config->usage_penalty;
+        ts->usage_penalties[phys] += ts->config->gate_usage_penalty;
     }
 
     // Mark as executed
@@ -180,15 +180,7 @@ void telesabre_calculate_attraction_paths(telesabre_t *ts) {
         size_t separated_node_ids[2] = {0};
         pqubit_t node_id_to_phys[2] = {0};
 
-        graph_t* contracted_graph = telesabre_build_contracted_graph_for_pair(ts, ts->layout, gate, separated_node_ids, node_id_to_phys);
-
-        int *node_id_translation = malloc(sizeof(int) * contracted_graph->num_nodes);
-        memcpy(node_id_translation, ts->device->comm_qubits, sizeof(int) * ts->device->num_comm_qubits);
-        for (int j = 0; j < contracted_graph->num_nodes - ts->device->num_comm_qubits; j++) {
-            node_id_translation[j + ts->device->num_comm_qubits] = node_id_to_phys[j];
-        }
-       // graph_print(contracted_graph, node_id_translation);
-        free(node_id_translation);
+        graph_t* contracted_graph = telesabre_build_contracted_graph_for_pair(ts, ts->layout, gate, separated_node_ids, node_id_to_phys, NULL, 0);
         
         int src = separated_node_ids[0];
         int dst = separated_node_ids[1];
@@ -361,8 +353,6 @@ void telesabre_slice_remaining_circuit(telesabre_t *ts) {
 
 
 float telesabre_evaluate_op_energy(telesabre_t* ts, const op_t* op) {
-    // TODO: Add traffic
-
     // Copy layout and apply op
     layout_t* layout = layout_copy(ts->layout);
     if (op->type == OP_TELEPORT) {
@@ -377,6 +367,10 @@ float telesabre_evaluate_op_energy(telesabre_t* ts, const op_t* op) {
         usage_penalty = new_penalty > usage_penalty ? new_penalty : usage_penalty;
     }
 
+    size_t traffic_size = 0;
+    size_t traffic_capacity = 10;
+    int (*traffic)[3] = malloc(sizeof(int) * traffic_capacity * 3);
+
     float front_energy = 0.0f;
     float extended_energy = 0.0f;
 
@@ -387,7 +381,11 @@ float telesabre_evaluate_op_energy(telesabre_t* ts, const op_t* op) {
         size_t slice_end = ts->remaining_slices_ptr[i + 1];
 
         for (size_t j = slice_start; j < slice_end && extended_set_size < ts->config->extended_set_size; j++) {
+            
+            
             const gate_t* gate = &ts->circuit->gates[ts->remaining_slices[j]];
+            if (!gate_is_two_qubit(gate)) continue;
+            if (ts->safety_valve_activated && ts->remaining_slices[j] != ts->front[0]) continue;
             
             float gate_energy = 0.0f;
             vqubit_t v1 = gate->target_qubits[0];
@@ -403,7 +401,7 @@ float telesabre_evaluate_op_energy(telesabre_t* ts, const op_t* op) {
                 pqubit_t node_id_to_phys[2] = {0};
 
                 graph_t* contracted_graph = telesabre_build_contracted_graph_for_pair(
-                    ts, layout, gate, separated_node_ids, node_id_to_phys
+                    ts, layout, gate, separated_node_ids, node_id_to_phys, traffic, traffic_size
                 );
                 
                 int src = separated_node_ids[0];
@@ -411,6 +409,22 @@ float telesabre_evaluate_op_energy(telesabre_t* ts, const op_t* op) {
 
                 path_t* shortest_path = graph_dijkstra(contracted_graph, src, dst);
                 gate_energy = shortest_path->distance;
+
+                // Collect traffic for the path
+                if (traffic_size + shortest_path->length > traffic_capacity) {
+                    traffic_capacity += 2*shortest_path->length;
+                    traffic = realloc(traffic, sizeof(int) * traffic_capacity * 3);
+                }
+                for (int k = 1; k < shortest_path->length; k++) {
+                    int node_id_a = shortest_path->nodes[k-1];
+                    int node_id_b = shortest_path->nodes[k];
+                    if (node_id_a < ts->device->num_comm_qubits && node_id_b < ts->device->num_comm_qubits) {
+                        traffic[traffic_size][0] = node_id_a;
+                        traffic[traffic_size][1] = node_id_b;
+                        traffic[traffic_size][2] = 1;
+                        traffic_size++;
+                    }
+                }
             }
 
             if (i == 0) {
@@ -444,7 +458,7 @@ float telesabre_evaluate_op_energy(telesabre_t* ts, const op_t* op) {
 
     //printf("Evaluating op: %d, energy: %.2f, front_energy: %.2f, extended_energy: %.2f, usage_penalty: %.2f\n",
     //       (op->type), energy, front_energy, extended_energy, usage_penalty);
-
+    free(traffic);
     return energy;
 }
 
@@ -619,7 +633,7 @@ void telesabre_apply_candidate_op(telesabre_t *ts, const op_t *op) {
     {
         layout_apply_teleport(ts->layout, op->qubits[0], op->qubits[1], op->qubits[2]);
         for (int i = 0; i < 3; i++) 
-            ts->usage_penalties[op->qubits[i]] += ts->config->usage_penalty;
+            ts->usage_penalties[op->qubits[i]] += ts->config->teledata_usage_penalty;
 
         ts->result.num_teledata++;
     } 
@@ -627,13 +641,13 @@ void telesabre_apply_candidate_op(telesabre_t *ts, const op_t *op) {
     {
         layout_apply_swap(ts->layout, op->qubits[0], op->qubits[1]);
         for (int i = 0; i < 2; i++) 
-            ts->usage_penalties[op->qubits[i]] += ts->config->usage_penalty;
+            ts->usage_penalties[op->qubits[i]] += ts->config->swap_usage_penalty;
         ts->result.num_swaps++;
     } 
     else if (op->type == OP_TELEGATE) 
     {
         for (int i = 0; i < 4; i++)
-            ts->usage_penalties[op->qubits[i]] += ts->config->usage_penalty;
+            ts->usage_penalties[op->qubits[i]] += ts->config->telegate_usage_penalty;
         int front_gate_idx = op->front_gate_idx;
         ts->result.num_telegate++;
         telesabre_execute_front_gate(ts, front_gate_idx);
@@ -656,7 +670,9 @@ graph_t* telesabre_build_contracted_graph_for_pair(
     const layout_t* layout,
     const gate_t* gate, 
     size_t node_ids_out[2],
-    pqubit_t* node_id_to_phys_out
+    pqubit_t* node_id_to_phys_out,
+    const int traffic[][3],
+    size_t num_traffic
 ) {
     const device_t* device = ts->device;
     int node_id = device->num_comm_qubits;
@@ -664,17 +680,11 @@ graph_t* telesabre_build_contracted_graph_for_pair(
     for (int q = 0; q < gate->num_target_qubits; q++) {
         pqubit_t p = layout_get_phys(layout, gate->target_qubits[q]);
         if (device->qubit_is_comm[p]) {
-            // Bad
-            node_ids_out[q] = -1;
-            for (int j = 0; j < device->num_comm_qubits; j++) {
-                if (device->comm_qubits[j] == p) {
-                    node_ids_out[q] = j;
-                    break;
-                }
-            }
+            node_ids_out[q] = device->comm_qubit_node_id[p];
         } else {
-            node_ids_out[q] = node_id++;
+            node_ids_out[q] = node_id;
             node_id_to_phys_out[node_ids_out[q]-device->num_comm_qubits] = p;
+            node_id++;
         }
     }
 
@@ -751,22 +761,38 @@ graph_t* telesabre_build_contracted_graph_for_pair(
 
     for (int i = 0; i < device->num_comm_qubits; i++) {
         pqubit_t pc = device->comm_qubits[i];
-        int node_id = device->comm_qubit_node_id[pc];
-        graph_set_node_weight(graph, node_id, 0);
+        graph_set_node_weight(graph, i, 0);
         
         // Free qubit distance penalty
-        int nearest_free_distance = heap_get_min(layout->nearest_free_qubits[node_id]).priority;
-        graph_increase_node_weight(graph, node_id, nearest_free_distance);
+        int nearest_free_distance = heap_get_min(layout->nearest_free_qubits[i]).priority;
+        graph_increase_node_weight(graph, i, nearest_free_distance);
 
         // Full core penalty
         core_t core = device->phys_to_core[pc];
         if (layout_get_core_remaining_capacity(layout, core) <= 2) {
-            graph_increase_node_weight(graph, node_id, ts->config->full_core_penalty);
+            graph_increase_node_weight(graph, i, ts->config->full_core_penalty);
         }
 
         // Gate qubit in communication qubit penalty
         if (pc == start_qubit || pc == end_qubit) {
-            graph_increase_node_weight(graph, node_id, 1);
+            graph_increase_node_weight(graph, i, 1);
+        }
+    }
+
+    // Traffic
+
+    if (traffic) {
+        for (size_t i = 0; i < num_traffic; i++) {
+            int src_node = device->comm_qubit_node_id[traffic[i][0]];
+            int dst_node = device->comm_qubit_node_id[traffic[i][1]];
+            int traffic_weight = traffic[i][2];
+
+            if (src_node < 0 || dst_node < 0 || src_node >= graph->num_nodes || dst_node >= graph->num_nodes) {
+                continue; // Invalid traffic
+            }
+
+            // Increase edge weight for traffic
+            graph_increase_edge_weight(graph, src_node, dst_node, traffic_weight);
         }
     }
 

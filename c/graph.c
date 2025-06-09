@@ -31,6 +31,16 @@ void graph_add_edge(graph_t *graph, int u, int v, int w) {
 }
 
 
+void graph_increase_edge_weight(graph_t *graph, int u, int v, int w) {
+    for (size_t i = 0; i < graph->adj[u].degree; ++i) {
+        if (graph->adj[u].edges[i].to == v) {
+            graph->adj[u].edges[i].weight += w;
+            return;
+        }
+    }
+}
+
+
 void graph_set_node_weight(graph_t *graph, int node, int weight) {
     graph->node_weights[node] = weight;
 }
@@ -85,12 +95,18 @@ path_t *graph_dijkstra(const graph_t *graph, int src, int dst) {
         size_t len = 0;
         for (int cur = dst; cur != -1; cur = prev[cur]) ++len;
         result->nodes = malloc(sizeof(int) * len);
+        result->distances = malloc(sizeof(int) * (len-1));
         check_alloc(5, result->nodes, result, dist, prev, visited);
         int cur = dst;
-        for (size_t i = len; i-- > 0;) {
-            result->nodes[i] = cur;
+        for (size_t i = len; i > 0; i--) {
+            result->nodes[i - 1] = cur;
+            if (i != 1) {
+                result->distances[i - 2] = dist[cur] - dist[prev[cur]];
+            }
             cur = prev[cur];
         }
+
+        
         result->length = len;
         result->distance = dist[dst];
     } else {
@@ -168,11 +184,29 @@ void graph_free(graph_t *graph) {
 
 path_t *path_copy(const path_t *src) {
     if (!src) return NULL;
+
     path_t *copy = malloc(sizeof(path_t));
+    
     copy->length = src->length;
     copy->distance = src->distance;
+
+    if (src->length == 0) {
+        copy->nodes = NULL;
+        copy->distances = NULL;
+        return copy;
+    }
+
     copy->nodes = malloc(sizeof(int) * src->length);
     memcpy(copy->nodes, src->nodes, sizeof(int) * src->length);
+
+    if (src->length <= 1) {
+        copy->distances = NULL;
+        return copy;
+    }
+
+    copy->distances = malloc(sizeof(int) * (src->length - 1));
+    memcpy(copy->distances, src->distances, sizeof(int) * (src->length - 1));
+
     return copy;
 }
 

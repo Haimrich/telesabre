@@ -106,7 +106,9 @@ graph_t* telesabre_build_contracted_graph_for_pair(
     const layout_t* layout,
     const gate_t* gate, 
     size_t node_ids_out[2],
-    pqubit_t* node_id_to_phys_out
+    pqubit_t* node_id_to_phys_out,
+    const int traffic[][3],
+    size_t num_traffic
 );
 
 void telesabre_add_report_entry(const telesabre_t* ts);
