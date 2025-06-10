@@ -45,6 +45,8 @@ config_t* config_new() {
     config->save_report = true;
     strcpy(config->report_filename, "report.json");
 
+    config->enable_passing_core_emptying_teleport_possibility = false;
+
     config->json = NULL;
     return config;
 }
@@ -103,7 +105,8 @@ config_t *config_from_json(const char* filename) {
 
     #define CONFIG_BOOL_ENTRIES \
         X(optimize_initial) \
-        X(save_report)
+        X(save_report) \
+        X(enable_passing_core_emptying_teleport_possibility)
     #define X(name) \
         const cJSON *json_##name = cJSON_GetObjectItemCaseSensitive(config_json, #name); \
         if (json_##name) cfg->name = cJSON_IsTrue(json_##name);

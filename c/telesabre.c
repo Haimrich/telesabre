@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <math.h>
 
 #include "circuit.h"
 #include "config.h"
@@ -105,6 +106,12 @@ void telesabre_safety_valve_check(telesabre_t *ts) {
         ts->result = ts->last_progress_result;
         printf("Safety valve activated at iteration %d\n", ts->it);
         ts->result.num_deadlocks++;
+    }
+
+    if (ts->safety_valve_activated && ts->it_without_progress > ts->config->safety_valve_iters * 2 && !ts->config->save_report) {
+        printf("Safety valve still activated after %d iterations, exiting...\n", ts->it_without_progress);
+        ts->config->save_report = true;
+        ts->config->max_iterations = ts->it + 1000;
     }
 }
 
@@ -367,6 +374,9 @@ float telesabre_evaluate_op_energy(telesabre_t* ts, const op_t* op) {
         float new_penalty = ts->usage_penalties[op->qubits[i]];
         usage_penalty = new_penalty > usage_penalty ? new_penalty : usage_penalty;
     }
+    if (op->type == OP_TELEGATE) {
+        usage_penalty = 1.0f;
+    }
 
     size_t traffic_size = 0;
     size_t traffic_capacity = 10;
@@ -383,7 +393,6 @@ float telesabre_evaluate_op_energy(telesabre_t* ts, const op_t* op) {
 
         for (size_t j = slice_start; j < slice_end && extended_set_size < ts->config->extended_set_size; j++) {
             
-            
             const gate_t* gate = &ts->circuit->gates[ts->remaining_slices[j]];
             if (!gate_is_two_qubit(gate)) continue;
             if (ts->safety_valve_activated && ts->remaining_slices[j] != ts->front[0]) continue;
@@ -396,7 +405,7 @@ float telesabre_evaluate_op_energy(telesabre_t* ts, const op_t* op) {
             core_t c1 = ts->device->phys_to_core[p1];
             core_t c2 = ts->device->phys_to_core[p2];
             if (c1 == c2) {
-                gate_energy = device_get_distance(ts->device, p1, p2) * 2;
+                gate_energy = abs(device_get_distance(ts->device, p1, p2) - 1);
             } else {
                 size_t separated_node_ids[2] = {0};
                 pqubit_t node_id_to_phys[2] = {0};
@@ -426,7 +435,6 @@ float telesabre_evaluate_op_energy(telesabre_t* ts, const op_t* op) {
                         traffic_size++;
                     }
                 }
-
                 graph_free(contracted_graph);
                 path_free(shortest_path);
             }
@@ -440,8 +448,8 @@ float telesabre_evaluate_op_energy(telesabre_t* ts, const op_t* op) {
 
             // Consider only one gate in safety valve mode
             if (ts->safety_valve_activated) {
-                if (front_energy <= 0.0f)
-                    error("Error in energy calculation while safety valve is activated.");
+                //if (front_energy <= 0.0f)
+                //    error("Error in energy calculation while safety valve is activated.");
                 break; 
             }
         }
@@ -482,6 +490,7 @@ void telesabre_add_candidate_op(telesabre_t* ts, const op_t* op) {
     } else if (op->type == OP_TELEGATE) {
         bonus = ts->config->telegate_bonus;
     }
+    
     ts->candidate_ops_energies[ts->num_candidate_ops] = telesabre_evaluate_op_energy(ts, op) - bonus;
 
     ts->num_candidate_ops++;
@@ -497,7 +506,8 @@ void telesabre_collect_candidate_tele_ops(telesabre_t *ts) {
     ts->num_candidate_ops = 0;
 
     for (int i = 0; i < ts->num_attraction_paths; i++) {
-        const gate_t* gate = &circuit->gates[ts->front[i]];
+        int front_gate_idx = ts->attraction_paths_front_idx[i];
+        const gate_t* gate = &circuit->gates[ts->front[front_gate_idx]];
         const path_t* shortest_path = ts->attraction_paths[i];
 
         // Check if telegate is possible
@@ -512,7 +522,7 @@ void telesabre_collect_candidate_tele_ops(telesabre_t *ts) {
                 device_has_edge(device, g1, m1) && device_has_edge(device, m2, g2)) {
 
                 // Add telegate operation
-                op_t telegate_op = {.type = OP_TELEGATE, .qubits = {g1, m1, m2, g2}, .front_gate_idx = ts->attraction_paths_front_idx[i]};
+                op_t telegate_op = {.type = OP_TELEGATE, .qubits = {g1, m1, m2, g2}, .front_gate_idx = front_gate_idx};
                 telesabre_add_candidate_op(ts, &telegate_op);
             }
         }
@@ -527,6 +537,7 @@ void telesabre_collect_candidate_tele_ops(telesabre_t *ts) {
             pqubit_t fwd_mediator = shortest_path->nodes[1];
             pqubit_t fwd_target = shortest_path->nodes[2];
             core_t fwd_target_core = device->phys_to_core[fwd_target];
+            core_t fwd_source_core = device->phys_to_core[fwd_source];
 
             if (fwd_source == p1 && device_has_edge(device, fwd_source, fwd_mediator) &&
                 device->qubit_is_comm[fwd_mediator] && layout_is_phys_free(layout, fwd_mediator) &&
@@ -534,7 +545,7 @@ void telesabre_collect_candidate_tele_ops(telesabre_t *ts) {
                 layout_get_core_remaining_capacity(layout, fwd_target_core) >= 2) {
                 
                 // Add teleport operation
-                op_t teleport_op = {.type = OP_TELEPORT, .qubits = {fwd_source, fwd_mediator, fwd_target, 0}, .front_gate_idx = ts->attraction_paths_front_idx[i]};
+                op_t teleport_op = {.type = OP_TELEPORT, .qubits = {fwd_source, fwd_mediator, fwd_target, 0}, .front_gate_idx = front_gate_idx};
                 telesabre_add_candidate_op(ts, &teleport_op);
             }
 
@@ -543,6 +554,7 @@ void telesabre_collect_candidate_tele_ops(telesabre_t *ts) {
             pqubit_t rev_mediator = shortest_path->nodes[shortest_path->length - 2];
             pqubit_t rev_target = shortest_path->nodes[shortest_path->length - 3];
             core_t rev_target_core = device->phys_to_core[rev_target];
+            core_t rev_source_core = device->phys_to_core[rev_source];
 
             if (rev_source == p2 && device_has_edge(device, rev_source, rev_mediator) &&
                 device->qubit_is_comm[rev_mediator] && layout_is_phys_free(layout, rev_mediator) &&
@@ -550,8 +562,57 @@ void telesabre_collect_candidate_tele_ops(telesabre_t *ts) {
                 layout_get_core_remaining_capacity(layout, rev_target_core) >= 2) {
                 
                 // Add teleport operation
-                op_t teleport_op = {.type = OP_TELEPORT, .qubits = {rev_source, rev_mediator, rev_target, 0}, .front_gate_idx = i};
+                op_t teleport_op = {.type = OP_TELEPORT, .qubits = {rev_source, rev_mediator, rev_target, 0}, .front_gate_idx = front_gate_idx};
                 telesabre_add_candidate_op(ts, &teleport_op);
+            }
+
+            /* 
+             * DEADLOCK SAFETY MEASURE:
+             * if we can do teleport but target core is full, 
+             * allow reverse teleport to free target core.
+             * 
+             * It greatly reduce deadlocks non-solvable by the safety valve, 
+             * i.e. deadlocks caused by full passing cores in the attraction path.
+             * but currently it decrease performance because it introduces 
+             * teleport loops. TODO improve this.
+             */
+
+            if (ts->config->enable_passing_core_emptying_teleport_possibility) {
+                if (layout_get_core_remaining_capacity(layout, fwd_source_core) >= 2 &&
+                    layout_get_core_remaining_capacity(layout, fwd_target_core) < 2 && 
+                    device->qubit_is_comm[fwd_mediator] && layout_is_phys_free(layout, fwd_mediator) &&
+                    device->qubit_is_comm[fwd_target] && layout_is_phys_free(layout, fwd_target)) {
+                    
+                    for (int e = 0; e < ts->device->qubit_num_edges[fwd_target]; e++) {
+                        pqubit_t edge_p1 = ts->device->qubit_to_edges[fwd_target][e].p1;
+                        pqubit_t edge_p2 = ts->device->qubit_to_edges[fwd_target][e].p2;
+
+                        pqubit_t other_phys = (edge_p1 == fwd_target) ? edge_p2 : edge_p1;
+                        if (!layout_is_phys_free(layout, other_phys)) {
+                            // Add reverse teleport operation
+                            op_t reverse_teleport_op = {.type = OP_TELEPORT, .qubits = {other_phys, fwd_target, fwd_mediator, 0}, .front_gate_idx = front_gate_idx};
+                            telesabre_add_candidate_op(ts, &reverse_teleport_op);
+                        }
+                    }
+                }
+
+                if (layout_get_core_remaining_capacity(layout, rev_source_core) >= 2 &&
+                    layout_get_core_remaining_capacity(layout, rev_target_core) < 2 && 
+                    device->qubit_is_comm[rev_mediator] && layout_is_phys_free(layout, rev_mediator) &&
+                    device->qubit_is_comm[rev_target] && layout_is_phys_free(layout, rev_target)) {
+                    
+                    for (int e = 0; e < ts->device->qubit_num_edges[rev_target]; e++) {
+                        pqubit_t edge_p1 = ts->device->qubit_to_edges[rev_target][e].p1;
+                        pqubit_t edge_p2 = ts->device->qubit_to_edges[rev_target][e].p2;
+
+                        pqubit_t other_phys = (edge_p1 == rev_target) ? edge_p2 : edge_p1;
+                        if (!layout_is_phys_free(layout, other_phys)) {
+                            // Add reverse teleport operation
+                            op_t reverse_teleport_op = {.type = OP_TELEPORT, .qubits = {other_phys, rev_target, rev_mediator, 0}, .front_gate_idx = front_gate_idx};
+                            telesabre_add_candidate_op(ts, &reverse_teleport_op);
+                        }
+                    }
+                }
             }
         }
     }
@@ -681,21 +742,20 @@ graph_t* telesabre_build_contracted_graph_for_pair(
     const device_t* device = ts->device;
     int node_id = device->num_comm_qubits;
 
-    for (int q = 0; q < gate->num_target_qubits; q++) {
-        pqubit_t p = layout_get_phys(layout, gate->target_qubits[q]);
-        if (device->qubit_is_comm[p]) {
-            node_ids_out[q] = device->comm_qubit_node_id[p];
-        } else {
-            node_ids_out[q] = node_id;
-            node_id_to_phys_out[node_ids_out[q]-device->num_comm_qubits] = p;
-            node_id++;
-        }
+    for (int i = 0; i < gate->num_target_qubits; i++) {
+        pqubit_t p = layout_get_phys(layout, gate->target_qubits[i]);
+        node_ids_out[i] = node_id;
+        node_id_to_phys_out[i] = p;
+        node_id++;
     }
 
     graph_t* graph = graph_new(node_id);
 
     pqubit_t start_qubit = layout_get_phys(layout, gate->target_qubits[0]);
     pqubit_t end_qubit = layout_get_phys(layout, gate->target_qubits[1]);
+
+    core_t start_core = device->phys_to_core[start_qubit];
+    core_t end_core = device->phys_to_core[end_qubit];
     
     // Edge Weights
     
@@ -706,12 +766,6 @@ graph_t* telesabre_build_contracted_graph_for_pair(
                 pqubit_t pc1 = device->core_comm_qubits[c][j];
                 pqubit_t pc2 = device->core_comm_qubits[c][k];
 
-                if (pc1 == start_qubit || pc1 == end_qubit ||
-                    pc2 == start_qubit || pc2 == end_qubit) {
-                    continue;
-                }
-
-                //int distance = device_get_distance(ts->device, pc1, pc2);
                 int distance = abs(device_get_distance(ts->device, pc1, pc2) - 1);
 
                 int pc1_node = device->comm_qubit_node_id[pc1];
@@ -734,29 +788,18 @@ graph_t* telesabre_build_contracted_graph_for_pair(
         int pc1_node = device->comm_qubit_node_id[pc1];
         int pc2_node = device->comm_qubit_node_id[pc2];
 
-        // Full core penalty
-        if (layout_get_core_remaining_capacity(layout, device->phys_to_core[pc1]) <= 2) {
-            distance += ts->config->full_core_penalty;
-        }
-        if (layout_get_core_remaining_capacity(layout, device->phys_to_core[pc2]) <= 2) {
-            distance += ts->config->full_core_penalty;
-        }
+        core_t pc1_core = device->phys_to_core[pc1];
+        core_t pc2_core = device->phys_to_core[pc2];
 
-        // Free qubit distance penalty
-        int nearest_free_distance_pc1 = heap_get_min(layout->nearest_free_qubits[pc1_node]).priority;
-        int nearest_free_distance_pc2 = heap_get_min(layout->nearest_free_qubits[pc2_node]).priority;
-        distance += nearest_free_distance_pc1 + nearest_free_distance_pc2;
-
-        // Gate qubit in communication qubit penalty
-        if (pc1 == start_qubit || pc1 == end_qubit) {
-            distance += 1;
-        }
+        //if (layout_get_core_remaining_capacity(layout, pc1_core) <= 1 ||
+        //    layout_get_core_remaining_capacity(layout, pc2_core) <= 1) {
+        //    distance += ts->config->full_core_penalty * 100;
+        //}
 
         graph_add_edge(graph, pc1_node, pc2_node, distance);
     }
 
     // Add edges from start qubit to all communication qubits in the same core
-    core_t start_core = device->phys_to_core[start_qubit];
     for (int j = 0; j < device->core_num_comm_qubits[start_core]; j++) {
         pqubit_t pc = device->core_comm_qubits[start_core][j];
 
@@ -764,14 +807,11 @@ graph_t* telesabre_build_contracted_graph_for_pair(
 
         int start_qubit_node = node_ids_out[0];
         int pc_node = device->comm_qubit_node_id[pc];
-
-        if (start_qubit_node == pc_node) continue;
         
         graph_add_directed_edge(graph, start_qubit_node, pc_node, distance);
     }
 
     // Add edges to end qubit from all communication qubits in the same core
-    core_t end_core = device->phys_to_core[end_qubit];
     for (int j = 0; j < device->core_num_comm_qubits[end_core]; j++) {
         pqubit_t pc = device->core_comm_qubits[end_core][j];
         
@@ -779,14 +819,12 @@ graph_t* telesabre_build_contracted_graph_for_pair(
         
         int pc_node = device->comm_qubit_node_id[pc];
         int end_qubit_node = node_ids_out[1];
-        
-        if (pc_node == end_qubit_node) continue;
-        
+                
         graph_add_directed_edge(graph, pc_node, end_qubit_node, distance);
     }
 
     // Node Weights
-/*
+
     for (int i = 0; i < device->num_comm_qubits; i++) {
         pqubit_t pc = device->comm_qubits[i];
         graph_set_node_weight(graph, i, 0);
@@ -800,13 +838,8 @@ graph_t* telesabre_build_contracted_graph_for_pair(
         if (layout_get_core_remaining_capacity(layout, core) <= 2) {
             graph_increase_node_weight(graph, i, ts->config->full_core_penalty);
         }
-
-        // Gate qubit in communication qubit penalty
-        if (pc == start_qubit || pc == end_qubit) {
-            graph_increase_node_weight(graph, i, 1);
-        }
     }
-*/
+
     // Traffic
 
     if (traffic) {
@@ -955,25 +988,26 @@ void telesabre_step(telesabre_t* ts) {
 
     // Find operations with lowest resulting layout energy
     int num_best_operations = 0;
+    op_t* best_operations = malloc(sizeof(op_t) * ts->num_candidate_ops);
     float best_energy = TS_INF;
     for (int i = 0; i < ts->num_candidate_ops; i++) {
         if (ts->candidate_ops_energies[i] < best_energy) {
             best_energy = ts->candidate_ops_energies[i];
-            ts->candidate_ops[0] = ts->candidate_ops[i];
+            best_operations[0] = ts->candidate_ops[i];
             num_best_operations = 1;
-        } else if (ts->candidate_ops_energies[i] == best_energy) {
-            ts->candidate_ops[num_best_operations++] = ts->candidate_ops[i];
+        } else if (ts->candidate_ops_energies[i] == best_energy || fabs(ts->candidate_ops_energies[i] - best_energy) < 1e-4) {
+            best_operations[num_best_operations++] = ts->candidate_ops[i];
         }
     }
 
     // Select a random operation from the best operations
     if (num_best_operations > 0) {
         int best_op_idx = rand() % num_best_operations;
-        const op_t best_op = ts->candidate_ops[best_op_idx];
+        const op_t best_op = best_operations[best_op_idx];
         ts->applied_op = best_op;
         telesabre_add_report_entry(ts);
         telesabre_apply_candidate_op(ts, &best_op);
-        ts->energy = ts->candidate_ops_energies[best_op_idx];
+        ts->energy = best_energy;
     } else {
         printf("    None\n");
         ts->applied_op = (op_t){0};

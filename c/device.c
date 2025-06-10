@@ -304,13 +304,6 @@ void device_print(const device_t* dev) {
     printf(HBLU"  Number of teleport edges:"CRESET" %d\n", dev->num_tp_edges);
     printf(HBLU"  Number of inter-core edges:"CRESET" %d\n", dev->num_intercore_edges);
 
-    for (int i = 0; i < dev->num_cores; i++) {
-        printf("  Core %d has %d qubits:\n", i, dev->core_num_comm_qubits[i]);
-        for (int j = 0; j < dev->core_num_comm_qubits[i]; j++) {
-            printf("  Comm qubit %d: %d\n", j, dev->core_comm_qubits[i][j]);
-        }
-    }
-
     // Intercore edges
     printf(HBLU"  Inter-core edges:"CRESET);
     for (int i = 0; i < dev->num_intercore_edges; i++) {

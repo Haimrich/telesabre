@@ -52,6 +52,8 @@ typedef struct config {
     bool save_report;
     char report_filename[256];
 
+    bool enable_passing_core_emptying_teleport_possibility;
+
     cJSON *json;
 } config_t;
 
