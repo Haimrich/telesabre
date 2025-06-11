@@ -1,0 +1,28 @@
+{
+    "config": {
+        "name": "default",
+        "seed": 52,
+        "energy_type": "extended-set",
+        "usage_penalties_reset_interval": 5,
+        "optimize_initial": false,
+        "initial_layout_type": "hungarian",
+        "teleport_bonus": 100,
+        "telegate_bonus": 100,
+        "safety_valve_iters": 100,
+        "extended_set_size": 20,
+        "extended_set_factor": 0.05,
+        "inter_core_edge_weight": 2,
+        "full_core_penalty": 10,
+        "max_solving_deadlock_iterations": 300,
+        "gate_usage_penalty": 0.000,
+        "swap_usage_penalty": 0.002,
+        "teledata_usage_penaly": 0.005,
+        "telegate_usage_penalty": 0.005,
+        "init_layout_hun_min_free_gate": 5,
+        "init_layout_hun_min_free_qubit": 4,
+        "enable_passing_core_emptying_teleport_possibility": false,
+        "max_iterations": 100000, 
+        "save_report": false,
+        "report_filename": "../viewer/report.json"
+    }
+}
