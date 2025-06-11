@@ -31,13 +31,13 @@ typedef struct config {
     int teleport_bonus;
     int telegate_bonus;
     int safety_valve_iters;
+    int max_safety_valve_iters;
 
     int extended_set_size;
     float extended_set_factor;
 
     int full_core_penalty;
     int inter_core_edge_weight;
-    int max_solving_deadlock_iterations;
 
     float gate_usage_penalty;
     float swap_usage_penalty;
@@ -53,6 +53,9 @@ typedef struct config {
     char report_filename[256];
 
     bool enable_passing_core_emptying_teleport_possibility;
+
+    int max_attempts;
+    int required_successes;
 
     cJSON *json;
 } config_t;

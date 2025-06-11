@@ -108,10 +108,10 @@ void telesabre_safety_valve_check(telesabre_t *ts) {
         ts->result.num_deadlocks++;
     }
 
-    if (ts->safety_valve_activated && ts->it_without_progress > ts->config->safety_valve_iters * 2 && !ts->config->save_report) {
+    if (ts->safety_valve_activated && ts->it_without_progress > ts->config->safety_valve_iters + ts->config->max_safety_valve_iters && !ts->config->save_report) {
         printf("Safety valve still activated after %d iterations, exiting...\n", ts->it_without_progress);
         ts->config->save_report = true;
-        ts->config->max_iterations = ts->it + 1000;
+        ts->config->max_iterations = ts->it + ts->config->max_safety_valve_iters;
     }
 }
 

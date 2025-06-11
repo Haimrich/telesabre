@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 
 #include "circuit.h"
 #include "config.h"
@@ -47,23 +48,28 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    
-    /*
-    //device_t *device = device_e();
-    device_t *device = device_h();
-    device_print(device);
 
-    //circuit_t *circuit = parse_qasm_file("/Users/enrico/Documents/telesabre/qasm_hun/qnn_nativegates_ibm_qiskit_opt3_26.qasm");
-    circuit_t *circuit = parse_qasm_file("/Users/enrico/Documents/telesabre/qasm_telegate/qnn_nativegates_ibm_qiskit_opt3_64.qasm");
-    circuit_print(circuit);
+    result_t result = {0};
+    result.num_teledata = INT_MAX;
 
-    sliced_circuit_view_t *view = circuit_get_sliced_view(circuit, false);
-    // sliced_circuit_view_print(view);
-
-    config_t *config = new_config();
-    */
-
-    result_t result = telesabre_run(config, device, circuit);
+    int max_iterations = config->max_iterations;
+    int successes = 0;
+    for (int i = 0; i < config->max_attempts && successes < config->required_successes; i++) {
+        config->max_iterations = max_iterations; // Reset max iterations for each run
+        config->save_report = false;
+        
+        result_t result_tmp = telesabre_run(config, device, circuit);
+        if (result_tmp.success) {
+            printf("Telesabre run successful!\n");
+            if (result_tmp.num_teledata + result_tmp.num_telegate < result.num_teledata + result.num_telegate) {
+                result = result_tmp;
+            }
+            successes++;
+        } else if (i < config->max_attempts - 1) { 
+            printf("Telesabre run failed, retrying with different seed...\n");
+        }
+        config->seed++;
+    } 
 
     device_print(device);
 

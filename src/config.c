@@ -29,7 +29,7 @@ config_t* config_new() {
 
     config->full_core_penalty = 10;
     config->inter_core_edge_weight = 2;
-    config->max_solving_deadlock_iterations = 300;
+    config->max_safety_valve_iters = 1000;
 
     config->gate_usage_penalty = 0;
     config->swap_usage_penalty = 0.002;
@@ -46,6 +46,9 @@ config_t* config_new() {
     strcpy(config->report_filename, "report.json");
 
     config->enable_passing_core_emptying_teleport_possibility = false;
+
+    config->max_attempts = 10;
+    config->required_successes = 1;
 
     config->json = NULL;
     return config;
@@ -79,10 +82,12 @@ config_t *config_from_json(const char* filename) {
         X(extended_set_size) \
         X(full_core_penalty) \
         X(inter_core_edge_weight) \
-        X(max_solving_deadlock_iterations) \
+        X(max_safety_valve_iters) \
         X(init_layout_hun_min_free_gate) \
         X(init_layout_hun_min_free_qubit) \
-        X(max_iterations)
+        X(max_iterations) \
+        X(max_attempts) \
+        X(required_successes)
     #define X(name) \
         const cJSON *json_##name = cJSON_GetObjectItemCaseSensitive(config_json, #name); \
         if (json_##name) cfg->name = json_##name->valueint;
