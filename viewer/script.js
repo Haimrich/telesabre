@@ -12,7 +12,8 @@ let nodes = [];
 let nodes_text = [];
 let edges = [];
 let edge_to_id = {};
-let nodes_coordiantes = [];
+let needed_edge_to_id = {};
+let nodes_coordinates = [];
 let colors = [];
 
 let gates = [];
@@ -20,17 +21,18 @@ let dependencies = [];
 let gate_to_edge_ids = [];
 
 let needed_edges = [];
+let needed_edges_labels = [];
 
-const POS_SCALE = 150;
-const POS_SCALE_CIR = 600;
-const Y_SCALE_CIR = 1.5;
-const X_SCALE_CIR = 1.5;
+const POS_SCALE = 50; // 150;
+const POS_SCALE_CIR = 600; //600;
+const Y_SCALE_CIR = 0.06; // 1.5;
+const X_SCALE_CIR = 0.06; // 1.5;
 
 function renderIteration(iteration) {
     console.log(data.iterations[iteration]);
 
     document.getElementById('iteration').textContent = iteration;
-    document.getElementById('energy').textContent = data.iterations[iteration].energy[0].toFixed(3);
+    document.getElementById('energy').textContent = data.iterations[iteration].energy.toFixed(3);
 
     const num_virt_qubits = data.circuit.num_qubits;
     for (let i = 0; i < nodes.length; i++) {
@@ -43,14 +45,14 @@ function renderIteration(iteration) {
         }
 
         p = data.iterations[iteration].virt_to_phys[i];
-        const [x, y] = nodes_coordiantes[p];
+        const [x, y] = nodes_coordinates[p];
         nodes[i].setAttribute("cx", x);
         nodes[i].setAttribute("cy", y);
 
         //nodes_text[i].setAttribute("x", x);
         //nodes_text[i].setAttribute("y", y);
 
-        const [ox, oy] = nodes_coordiantes[i];
+        const [ox, oy] = nodes_coordinates[i];
         nodes_text[i].style.transform = `translate(${x-ox}px, ${y-oy}px)`;
     }
 
@@ -63,14 +65,18 @@ function renderIteration(iteration) {
         const gate = data.iterations[iteration].applied_gates[g];
         if (gate.length == 2) {
             const [p1, p2] = gate
-            const e = edge_to_id[[p1, p2]]
-            edges[e].style.stroke = "green";
-            edges[e].style.strokeWidth = 5;
+            if (p2 > -1) {
+                const e = edge_to_id[[p1, p2]]
+                console.log(p1, p2, e);
+                edges[e].style.stroke = "green";
+                edges[e].style.strokeWidth = 5;
+            }
         }
     }
 
     for (let o = 0; o < data.iterations[iteration].applied_ops.length; o++) {
         const op = data.iterations[iteration].applied_ops[o];
+        if (op[0] == 0 && op[1] == 0) continue;
         let color = "red";
         if (op.length == 3) {
             color = "blue";
@@ -87,14 +93,20 @@ function renderIteration(iteration) {
     // Need edges
     for (let i = 0; i < needed_edges.length; i++) {
         needed_edges[i].style.opacity = 0;
+        needed_edges_labels[i].style.opacity = 0;
     }
 
     for (let i = 0; i < data.iterations[iteration].needed_paths.length; i++) {
         const path = data.iterations[iteration].needed_paths[i];
         console.log(path);
         for (let j = 0; j < path.length - 1; j++) {
-            const e = edge_to_id[[path[j], path[j+1]]];
+            const e = needed_edge_to_id[[path[j], path[j+1]]];
             needed_edges[e].style.opacity = 1;
+            if (data.iterations[iteration].needed_paths_distances) {
+                const distance = data.iterations[iteration].needed_paths_distances[i][j];
+                needed_edges_labels[e].textContent = `${distance}`;
+                needed_edges_labels[e].style.opacity = 1;
+            }
         }
     }
 
@@ -216,19 +228,19 @@ function setupScenes() {
 
     let svg = document.querySelector('#layout-scene svg');
 
-    arch_data = data.architecture;
-    const num_qubits = arch_data.node_positions.length;
+    device_data = data.device;
+    const num_qubits = device_data.node_positions.length;
     const num_virt_qubits = data.circuit.num_qubits;
     colors = generateNiceColors(num_virt_qubits);
 
     // Qubits
-    const min_qubit_x = Math.min(...arch_data.node_positions.map(x => parseFloat(x[0])));
-    const min_qubit_y = Math.min(...arch_data.node_positions.map(x => parseFloat(x[1])));
+    const min_qubit_x = Math.min(...device_data.node_positions.map(x => parseFloat(x[0])));
+    const min_qubit_y = Math.min(...device_data.node_positions.map(x => parseFloat(x[1])));
 
 
     for (let p = 0; p < num_qubits; p++) {
-        const x = (arch_data.node_positions[p][0] - min_qubit_x + 0.2) * POS_SCALE;
-        const y = (arch_data.node_positions[p][1] - min_qubit_y + 0.2) * POS_SCALE; 
+        const x = (device_data.node_positions[p][0] - min_qubit_x + 0.2) * POS_SCALE;
+        const y = (device_data.node_positions[p][1] - min_qubit_y + 0.2) * POS_SCALE; 
 
         let newQubit = document.createElementNS("http://www.w3.org/2000/svg", 'circle');
         newQubit.setAttribute("cx", x); 
@@ -241,7 +253,7 @@ function setupScenes() {
         newQubitTitle.textContent = p;
         newQubit.appendChild(newQubitTitle);
         nodes.push(newQubit);
-        nodes_coordiantes.push([x, y])
+        nodes_coordinates.push([x, y])
 
         const newQubitLabel = document.createElementNS("http://www.w3.org/2000/svg", 'text');
         newQubitLabel.setAttribute("x", x);
@@ -254,12 +266,12 @@ function setupScenes() {
     }
 
     // Edges
-    for (let e = 0; e < arch_data.edges.length; e++) {
-        let edge = arch_data.edges[e];
+    for (let e = 0; e < device_data.intra_core_edges.length; e++) {
+        let edge = device_data.intra_core_edges[e];
         let q1 = edge[0];
         let q2 = edge[1];
-        let [x1, y1] = nodes_coordiantes[q1];
-        let [x2, y2] = nodes_coordiantes[q2];
+        let [x1, y1] = nodes_coordinates[q1];
+        let [x2, y2] = nodes_coordinates[q2];
 
         let newEdge = document.createElementNS("http://www.w3.org/2000/svg", 'line');
         newEdge.setAttribute("x1", x1); //Set x1 coordinate
@@ -270,28 +282,17 @@ function setupScenes() {
         newEdge.style.strokeWidth = "1"; //Set stroke width
         edges.push(newEdge);
 
-        let newNeededEdge = document.createElementNS("http://www.w3.org/2000/svg", 'line');
-        newNeededEdge.setAttribute("x1", x1); //Set x1 coordinate
-        newNeededEdge.setAttribute("y1", y1); //Set y1 coordinate
-        newNeededEdge.setAttribute("x2", x2); //Set x2 coordinate
-        newNeededEdge.setAttribute("y2", y2); //Set y2 coordinate
-        newNeededEdge.style.stroke = "pink";
-        newNeededEdge.style.strokeWidth = "6"; 
-        newNeededEdge.style.strokeDasharray = "1.5 1.5";
-        newNeededEdge.style.opacity = "0";
-        needed_edges.push(newNeededEdge);
-
         edge_to_id[[q1, q2]] = e;
         edge_to_id[[q2, q1]] = e;
     }
 
     // TP-edges
-    for (let r = 0; r < arch_data.teleport_edges.length; r++) {
-        let edge = arch_data.teleport_edges[r];
+    for (let r = 0; r < device_data.inter_core_edges.length; r++) {
+        let edge = device_data.inter_core_edges[r];
         let q1 = edge[0];
         let q2 = edge[1];
-        let [x1, y1] = nodes_coordiantes[q1];
-        let [x2, y2] = nodes_coordiantes[q2];
+        let [x1, y1] = nodes_coordinates[q1];
+        let [x2, y2] = nodes_coordinates[q2];
 
         let newEdge = document.createElementNS("http://www.w3.org/2000/svg", 'path');
         newEdge.setAttribute("d", generateSinusoidPath(x1, y1, x2, y2));
@@ -300,6 +301,8 @@ function setupScenes() {
         newEdge.setAttribute("stroke-width", "1");
         edges.push(newEdge);
 
+        edge_to_id[[q1, q2]] = r + device_data.intra_core_edges.length;
+        edge_to_id[[q2, q1]] = r + device_data.intra_core_edges.length;
 
         let newNeededEdge = document.createElementNS("http://www.w3.org/2000/svg", 'line');
         newNeededEdge.setAttribute("x1", x1); //Set x1 coordinate
@@ -312,21 +315,87 @@ function setupScenes() {
         newNeededEdge.style.opacity = "0";
         needed_edges.push(newNeededEdge);
 
-        edge_to_id[[q1, q2]] = r + arch_data.edges.length;
-        edge_to_id[[q2, q1]] = r + arch_data.edges.length;
+        // Edge labels
+        let xm = (x1 + x2) / 2;
+        let ym = (y1 + y2) / 2;
+
+        let label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        label.setAttribute("x", xm);
+        label.setAttribute("y", ym);
+        label.setAttribute("font-size", "12");
+        label.setAttribute("text-anchor", "middle");
+        label.setAttribute("dominant-baseline", "middle");
+        label.setAttribute("fill", "black");
+        label.style.opacity = "0";
+        label.style.backgroundColor = "white";
+        label.style.padding = "2px";
+        label.style.borderRadius = "3px";
+        label.textContent = `0`;
+        needed_edges_labels.push(label);
+
+        needed_edge_to_id[[q1, q2]] = needed_edges.length - 1;
+        needed_edge_to_id[[q2, q1]] = needed_edges.length - 1;
     }
+
+
+    // Add needed edges between core qubits and comm qubits
+    comm_qubits = new Set(device_data.inter_core_edges.flat());
+    comm_qubits.forEach(comm_qubit => {
+        const core_capacity = Math.floor(device_data.num_qubits / device_data.num_cores);
+        const core = Math.floor(comm_qubit / core_capacity);
+        // Connect to all the qubits in the same core
+        for (let q = core * core_capacity; q < (core + 1) * core_capacity; q++) {
+            if (q != comm_qubit) {
+                let [x1, y1] = nodes_coordinates[q];
+                let [x2, y2] = nodes_coordinates[comm_qubit];
+
+                let newEdge = document.createElementNS("http://www.w3.org/2000/svg", 'line');
+                newEdge.setAttribute("x1", x1); //Set x1 coordinate
+                newEdge.setAttribute("y1", y1); //Set y1 coordinate
+                newEdge.setAttribute("x2", x2); //Set x2 coordinate
+                newEdge.setAttribute("y2", y2); //Set y2 coordinate
+                newEdge.style.stroke = "pink";
+                newEdge.style.strokeWidth = "6"; 
+                newEdge.style.strokeDasharray = "1.5 1.5";
+                newEdge.style.opacity = "0";
+                needed_edges.push(newEdge);
+
+                // Edge labels
+                let xm = (x1 + x2) / 2;
+                let ym = (y1 + y2) / 2;
+
+                let label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                label.setAttribute("x", xm);
+                label.setAttribute("y", ym);
+                label.setAttribute("font-size", "12");
+                label.setAttribute("text-anchor", "middle");
+                label.setAttribute("dominant-baseline", "middle");
+                label.setAttribute("fill", "black");
+                label.style.opacity = "0";
+                label.style.backgroundColor = "white";
+                label.style.padding = "2px";
+                label.style.borderRadius = "3px";
+                label.textContent = `0`; // Or any label you want
+                needed_edges_labels.push(label);
+
+                needed_edge_to_id[[q, comm_qubit]] = needed_edges.length - 1;
+                needed_edge_to_id[[comm_qubit, q]] = needed_edges.length - 1;
+            }
+        }
+    });
 
 
     // Add edges
     for (let i = 0; i < needed_edges.length; i++) {
         svg.appendChild(needed_edges[i]);
+        svg.appendChild(needed_edges_labels[i]);
     }
     for (let i = 0; i < edges.length; i++) {
         svg.appendChild(edges[i]);
     }
     // Add qubits
     for (let i = 0; i < nodes.length; i++) {
-        const [x,y] = nodes_coordiantes[i];
+        const [x,y] = nodes_coordinates[i];
         let place = document.createElementNS("http://www.w3.org/2000/svg", 'circle');
         place.setAttribute("cx", x); //Set x coordinate
         place.setAttribute("cy", y); //Set y coordinate
@@ -397,8 +466,13 @@ function setupScenes() {
             rect1.setAttribute("y",  y - 0.005 * POS_SCALE_CIR)
             gateLabel1.setAttribute("y", y)
         }
+
+        const gateTitle = document.createElementNS("http://www.w3.org/2000/svg", 'title');
+        gateTitle.textContent = `${g}`;
+
         gate_group.appendChild(rect1);
         gate_group.appendChild(gateLabel1);
+        gate_group.appendChild(gateTitle);
 
 
         gate_group.style.opacity = 0.4;
@@ -451,7 +525,7 @@ function setupScenes() {
 }
 
 function retrieveData() {
-    fetch('/data.json')
+    fetch('/report.json')
         .then(response => response.json())
         .then(retrieved_data => {
             data = retrieved_data
