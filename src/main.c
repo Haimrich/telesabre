@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <string.h>
 #include <limits.h>
 
@@ -53,10 +54,11 @@ int main(int argc, char *argv[]) {
     result.num_teledata = INT_MAX;
 
     int max_iterations = config->max_iterations;
+    bool save_report = config->save_report;
     int successes = 0;
     for (int i = 0; i < config->max_attempts && successes < config->required_successes; i++) {
-        config->max_iterations = max_iterations; // Reset max iterations for each run
-        config->save_report = false;
+        config->max_iterations = max_iterations; 
+        config->save_report = save_report;
         
         result_t result_tmp = telesabre_run(config, device, circuit);
         if (result_tmp.success) {
@@ -73,13 +75,21 @@ int main(int argc, char *argv[]) {
 
     device_print(device);
 
-    printf("\nResult:\n");
-    printf("  Depth: %d\n", result.depth);
-    printf("  Teledata: %d\n", result.num_teledata);
-    printf("  Telegate: %d\n", result.num_telegate);
-    printf("  Swaps: %d\n", result.num_swaps);
-    printf("  Deadlocks: %d\n", result.num_deadlocks);
-    printf("  Success: %s\n", result.success ? "true" : "false");
+    if (result.num_teledata == INT_MAX) {
+        printf("No successful runs :(\n");
+    } else {
+        if (successes > 1) {
+            printf("\nBest result after %d successfull runs:\n", successes);
+        } else {
+            printf("\nResult:\n");
+        }
+        printf("  Depth: %d\n", result.depth);
+        printf("  Teledata: %d\n", result.num_teledata);
+        printf("  Telegate: %d\n", result.num_telegate);
+        printf("  Swaps: %d\n", result.num_swaps);
+        printf("  Deadlocks: %d\n", result.num_deadlocks);
+        printf("  Success: %s\n", result.success ? "true" : "false");
+    }
 
     device_free(device);
     circuit_free(circuit);
