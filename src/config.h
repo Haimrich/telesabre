@@ -61,8 +61,44 @@ typedef struct config {
 } config_t;
 
 
+#define TS_CONFIG_INT_ENTRIES \
+    X(usage_penalties_reset_interval) \
+    X(teleport_bonus) \
+    X(telegate_bonus) \
+    X(safety_valve_iters) \
+    X(extended_set_size) \
+    X(full_core_penalty) \
+    X(inter_core_edge_weight) \
+    X(max_safety_valve_iters) \
+    X(init_layout_hun_min_free_gate) \
+    X(init_layout_hun_min_free_qubit) \
+    X(max_iterations) \
+    X(max_attempts) \
+    X(required_successes)
+
+#define TS_CONFIG_FLOAT_ENTRIES \
+    X(gate_usage_penalty) \
+    X(swap_usage_penalty) \
+    X(teledata_usage_penalty) \
+    X(telegate_usage_penalty) \
+    X(extended_set_factor)
+
+#define TS_CONFIG_BOOL_ENTRIES \
+    X(optimize_initial) \
+    X(save_report) \
+    X(enable_passing_core_emptying_teleport_possibility)
+
+#define TS_CONFIG_STRING_ENTRIES \
+    X(name) \
+    X(report_filename)
+
+
 config_t *config_new();
 
 config_t *config_from_json(const char *filename);
+
+void config_set_initial_layout_type(config_t *config, const char *value);
+void config_set_energy_type(config_t *config, const char *value);
+void config_set_parameter(config_t *config, const char *key, const char *value);
 
 void config_free(config_t *config);

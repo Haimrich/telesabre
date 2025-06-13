@@ -21,18 +21,26 @@ int main(int argc, char *argv[]) {
     circuit_t *circuit = NULL;
 
     for (int i = 1; i < argc; ++i) {
-        const char *filename = argv[i];
-        const char *ext = strrchr(filename, '.');
-        if (strcmp(ext, ".qasm") == 0) {
-            printf("Parsing .qasm file: %s\n", filename);
-            circuit = circuit_from_qasm(filename);
-        } else if (strcmp(ext, ".json") == 0) {
-            printf("Parsing .json file: %s\n", filename);
-            if (!device) device = device_from_json(filename);
-            if (!config) config = config_from_json(filename);
-            if (!circuit) circuit = circuit_from_json(filename);
+        const char *argument = argv[i];
+        const char *ext = strrchr(argument, '.');
+        if (ext != NULL && strcmp(ext, ".qasm") == 0) {
+            printf("Parsing .qasm file: %s\n", argument);
+            circuit = circuit_from_qasm(argument);
+        } else if (ext != NULL && strcmp(ext, ".json") == 0) {
+            printf("Parsing .json file: %s\n", argument);
+            if (!device) device = device_from_json(argument);
+            if (!config) config = config_from_json(argument);
+            if (!circuit) circuit = circuit_from_json(argument);
+        } else if (strncmp(argument, "--", 2) == 0) {
+            if (!config) {
+                fprintf(stderr, "Error: Provide config before override arguments.\n");
+                return 1;
+            }
+            const char *overwrite_parameter = argument + 2;
+            const char *overwrite_value = argv[++i];
+            config_set_parameter(config, overwrite_parameter, overwrite_value);
         } else {
-            fprintf(stderr, "Error: File '%s' does not have a .json or .qasm extension.\n", filename);
+            fprintf(stderr, "Error: File '%s' does not have a .json or .qasm extension.\n", argument);
             return 1;
         }
     }
